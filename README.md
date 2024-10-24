@@ -3,7 +3,7 @@
 This repository contains a Python script that demonstrates Anthropic's Computer Use capabilities, modified to run on MacOS without requiring a Docker container. The script allows Claude 3.5 Sonnet to perform tasks on your Mac by simulating mouse and keyboard actions as well as running bash command.
 
 Forked from Anthropic's [computer use demo](https://github.com/anthropics/anthropic-quickstarts/tree/main/computer-use-demo) - optimized for MacOS.
-Vew Anthropic's docs [here](https://docs.anthropic.com/en/docs/build-with-claude/computer-use).
+View Anthropic's docs [here](https://docs.anthropic.com/en/docs/build-with-claude/computer-use).
 
 > [!WARNING]  
 > Use this script with caution. Allowing Claude to control your computer can be risky. By running this script, you assume all responsibility and liability.
