@@ -24,9 +24,13 @@ async def main():
     # Check if the instruction is provided via command line arguments
     if len(sys.argv) > 1:
         instruction = " ".join(sys.argv[1:])
+        if len(sys.argv) > 2:
+            rag_url = sys.argv[2]
+        else:
+            rag_url = None  
     else:
         instruction = "Save an image of a cat to the desktop."
-
+        rag_url = None
     print(
         f"Starting Claude 'Computer Use'.\nPress ctrl+c to stop.\nInstructions provided: '{instruction}'"
     )
@@ -102,6 +106,7 @@ async def main():
         system_prompt_suffix="",
         messages=messages,
         instruction=instruction,
+        rag_url=rag_url,
         output_callback=output_callback,
         tool_output_callback=tool_output_callback,
         api_response_callback=api_response_callback,

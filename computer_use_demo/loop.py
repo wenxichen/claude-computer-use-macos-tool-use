@@ -25,6 +25,19 @@ from anthropic.types.beta import (
 
 from .tools import BashTool, ComputerTool, EditTool, ToolCollection, ToolResult
 
+from llama_index.core import SummaryIndex
+from llama_index.readers.web import SimpleWebPageReader
+import os
+
+######
+# RAG logging
+import logging
+import sys
+
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+logging.getLogger().addHandler(logging.StreamHandler(stream=sys.stdout))
+######
+
 BETA_FLAG = "computer-use-2024-10-22"
 
 
@@ -184,6 +197,7 @@ async def sampling_loop(
     api_key: str,
     only_n_most_recent_images: int | None = None,
     max_tokens: int = 4096,
+    rag_url: str | None = None,
 ):
     """
     Agentic sampling loop for the assistant/tool interaction of computer use.
@@ -209,14 +223,28 @@ async def sampling_loop(
         f"{QA_SYSTEM_PROMPT}\n\n<INSTRUCTION>\n{instruction}\n</INSTRUCTION>"
     )
     # Overwrite the messages with the manager's plan
-    messages=[
-        {
+    messages=[]
+
+    if rag_url:
+        documents = SimpleWebPageReader(html_to_text=True).load_data([rag_url])
+        index = SummaryIndex.from_documents(documents)
+        retriever = index.as_retriever()
+        nodes = retriever.retrieve(instruction)
+        relevent_context = "\n".join([node.get_content() for node in nodes] )
+        messages.append(
+            {
+                "role": "user",
+                "content": f"Here is some relevent context for the task:\n{relevent_context}"
+            }
+        )
+        print(relevent_context)
+
+    messages.append({
             "role": "user",
             "content": 
                     f"Given the INSTRUCTION and context, "
                     "please provide a plan for the agent to complete the task. Please do not use any tools.",
-        }
-    ]
+        })
 
     total_sessions = 0
 
