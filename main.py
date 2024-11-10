@@ -3,12 +3,14 @@ import os
 import sys
 import json
 import base64
+import agentops
 
 from computer_use_demo.loop import sampling_loop, APIProvider
 from computer_use_demo.tools import ToolResult
 from anthropic.types.beta import BetaMessage, BetaMessageParam
 from anthropic import APIResponse
 
+agentops.init(api_key="f03a808a-f077-4f37-9af0-f983707614de")
 
 async def main():
     # Set up your Anthropic API key and model
@@ -55,12 +57,43 @@ async def main():
                 f.write(base64.b64decode(image_data))
             print(f"Took screenshot screenshot_{tool_use_id}.png")
 
-    def api_response_callback(response: APIResponse[BetaMessage]):
-        print(
-            "\n---------------\nAPI Response:\n",
-            json.dumps(json.loads(response.text)["content"], indent=4),  # type: ignore
-            "\n",
-        )
+    def api_response_callback(response: APIResponse[BetaMessage], step: int=None, role: str = "worker", is_done: bool = False, final_report: str = None, session_number: int = None):
+        if is_done:
+            print("\n---------------\nQA think it is Done")
+            return
+        else:
+            if role == "manager":
+                if final_report:
+                    print(
+                        "\n================\nManager",
+                        "\nFinal Report:\n",
+                        final_report,
+                        "\n================\n",
+                    )
+                else:
+                    print(
+                        "\n---------------\nSession: ", session_number+1, " | Manager",
+                        "\nAPI Response:\n",
+                        json.dumps(json.loads(response.text)["content"], indent=4),  # type: ignore
+                        "\n",
+                    )
+            elif role == "qa":
+                print(
+                    "\n---------------\nSession: ", session_number+1, " | QA",
+                    "\nAPI Response:\n",
+                    json.dumps(json.loads(response.text)["content"], indent=4),  # type: ignore
+                    "\n",
+                )
+            elif role == "worker":
+                print(
+                    "\n---------------\nSession: ", session_number+1, " Step:",
+                    step+1,
+                    "\nAPI Response:\n",
+                    json.dumps(json.loads(response.text)["content"], indent=4),  # type: ignore
+                    "\n",
+                )
+            else:
+                raise ValueError(f"Invalid role: {role}")
 
     # Run the sampling loop
     messages = await sampling_loop(
@@ -68,6 +101,7 @@ async def main():
         provider=provider,
         system_prompt_suffix="",
         messages=messages,
+        instruction=instruction,
         output_callback=output_callback,
         tool_output_callback=tool_output_callback,
         api_response_callback=api_response_callback,
@@ -82,3 +116,5 @@ if __name__ == "__main__":
         asyncio.run(main())
     except Exception as e:
         print(f"Encountered Error:\n{e}")
+
+    agentops.end_session('Success')

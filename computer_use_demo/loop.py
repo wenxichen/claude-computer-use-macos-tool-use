@@ -2,6 +2,7 @@
 Agentic sampling loop that calls the Anthropic API and local implenmentation of anthropic-defined computer use tools.
 """
 
+import json
 import platform
 from collections.abc import Callable
 from datetime import datetime
@@ -46,7 +47,8 @@ PROVIDER_TO_DEFAULT_MODEL_NAME: dict[APIProvider, str] = {
 # environment it is running in, and to provide any additional information that may be
 # helpful for the task at hand.
 SYSTEM_PROMPT = f"""<SYSTEM_CAPABILITY>
-* You are utilizing a MacOS computer using {platform.machine()} architecture with internet access.
+* You are a worker agent utilizing a MacOS computer using {platform.machine()} architecture with internet access.
+* You have a manager that may provide you with plan and suggestions for how to complete the task.
 * You can use the bash tool to execute commands in the terminal.
 * To open applications, you can use the `open` command in the bash tool. For example, `open -a Safari` to open the Safari browser.
 * When using your bash tool with commands that are expected to output very large quantities of text, redirect the output into a temporary file and use `str_replace_editor` or `grep -n -B <lines before> -A <lines after> <query> <filename>` to inspect the output.
@@ -58,8 +60,116 @@ SYSTEM_PROMPT = f"""<SYSTEM_CAPABILITY>
 <IMPORTANT>
 * When using Safari or other applications, if any startup wizards or prompts appear, **IGNORE THEM**. Do not interact with them. Instead, click on the address bar or the area where you can enter commands or URLs, and proceed with your task.
 * If the item you are looking at is a PDF, and after taking a single screenshot of the PDF it seems you want to read the entire document, instead of trying to continue to read the PDF from your screenshots and navigation, determine the URL, use `curl` to download the PDF, install and use `pdftotext` (you may need to install it via `brew install poppler`) to convert it to a text file, and then read that text file directly with your `str_replace_editor` tool.
-</IMPORTANT>"""
+</IMPORTANT>
+"""
 
+MANAGER_SYSTEM_PROMPT = f"""<SYSTEM_CAPABILITY>
+* You are a manager of two agents: one worker agent that utilizes a MacOS computer using {platform.machine()} architecture with internet access, and one quality assurance agent that will review the worker agent's output.
+* You and the agents will have access to the screen of the computer.
+* You can evaluate the goal and the progress from the agents to decide what the agents should do next.
+* When you are not sure what the agent should do next, you can ask the agent to search for relevent information on Google.
+* The current date is {datetime.today().strftime('%A, %B %-d, %Y')}.
+</SYSTEM_CAPABILITY>
+
+<IMPORTANT>
+* Please do not use any tools! Just provide a plan in text format for the worker agent to complete the task.
+</IMPORTANT>
+"""
+
+QA_SYSTEM_PROMPT = f"""<SYSTEM_CAPABILITY>
+* You are a quality assurance agent.
+* You will review the worker agent's output and determine if it is correct and complete and meets the goal defined by the original instruction.
+* The current date is {datetime.today().strftime('%A, %B %-d, %Y')}.
+* Please output in JSON format with the following keys:
+    * `is_complete`: boolean indicating if the worker agent's output is correct and complete and meets the goal defined by the original instruction.
+    * `feedback`: string providing feedback on the worker agent's output.
+* Here is an example JSON output::
+    {{"is_complete": true, "feedback": "The worker agent's output is correct and complete and meets the goal defined by the original instruction."}}
+</SYSTEM_CAPABILITY>
+
+<IMPORTANT>
+* Please do not use any tools! Just respond with a JSON output.
+</IMPORTANT>
+"""
+
+def _manager_check_progress(
+        messages: list[BetaMessageParam], 
+        provider: APIProvider, 
+        api_key: str, 
+        model: str, 
+        manager_system: str, 
+        api_response_callback: Callable[[APIResponse[BetaMessage]], None],
+        tool_collection: ToolCollection,
+        session_number: int
+):
+    
+    if provider == APIProvider.ANTHROPIC:
+        client = Anthropic(api_key=api_key)
+    elif provider == APIProvider.VERTEX:
+        client = AnthropicVertex()
+    elif provider == APIProvider.BEDROCK:
+        client = AnthropicBedrock()
+    
+    # Call the API to get some planning and context
+    raw_response = client.beta.messages.with_raw_response.create(
+        max_tokens=1024,
+        system=manager_system,
+        messages=messages,
+        tools=tool_collection.to_params(),
+        model=model,
+        betas=["computer-use-2024-10-22"]
+    )
+
+    api_response_callback(cast(APIResponse[BetaMessage], raw_response), role="manager", session_number=session_number) 
+
+    response = raw_response.parse()
+
+    messages.append(
+        {
+            "role": "user",
+            "content": f"Given the instructions above, here is the plan provided by the manager: {response.content}"
+            "\nPlease follow the plan to complete the task.",
+        }
+    )
+
+def _manager_report_progress(
+    messages: list[BetaMessageParam], 
+    provider: APIProvider, 
+    api_key: str, 
+    model: str, 
+    manager_system: str,
+    api_response_callback: Callable[[APIResponse[BetaMessage]], None],
+    tool_collection: ToolCollection,
+):
+    
+    messages = messages + [
+        {
+            "role": "user",
+            "content": 
+                f"Given the INSTRUCTION and what the worker agent has done, "
+                "please generate a short report on what has been done and whether the goal has been achieved.",
+        }
+    ]  
+
+    if provider == APIProvider.ANTHROPIC:
+        client = Anthropic(api_key=api_key)
+    elif provider == APIProvider.VERTEX:
+        client = AnthropicVertex()
+    elif provider == APIProvider.BEDROCK:
+        client = AnthropicBedrock()
+    
+    # Call the API to get some planning and context
+    raw_response = client.beta.messages.with_raw_response.create(
+        max_tokens=1024,
+        system=manager_system,
+        messages=messages,
+        tools=tool_collection.to_params(),
+        model=model,
+        betas=["computer-use-2024-10-22"]
+    )
+
+    response = raw_response.parse()
+    api_response_callback(None, role="manager", final_report=response.content[0].text) 
 
 async def sampling_loop(
     *,
@@ -67,6 +177,7 @@ async def sampling_loop(
     provider: APIProvider,
     system_prompt_suffix: str,
     messages: list[BetaMessageParam],
+    instruction: str,
     output_callback: Callable[[BetaContentBlock], None],
     tool_output_callback: Callable[[ToolResult, str], None],
     api_response_callback: Callable[[APIResponse[BetaMessage]], None],
@@ -82,62 +193,133 @@ async def sampling_loop(
         BashTool(),
         EditTool(),
     )
+    # system = (
+    #     f"{SYSTEM_PROMPT}{' ' + system_prompt_suffix if system_prompt_suffix else ''}"
+    # )
+
     system = (
-        f"{SYSTEM_PROMPT}{' ' + system_prompt_suffix if system_prompt_suffix else ''}"
+        f"{SYSTEM_PROMPT}\n\n<INSTRUCTION>\n{instruction}\n</INSTRUCTION>"
     )
 
-    while True:
-        if only_n_most_recent_images:
-            _maybe_filter_to_n_most_recent_images(messages, only_n_most_recent_images)
+    manager_system = (
+        f"{MANAGER_SYSTEM_PROMPT}\n\n<INSTRUCTION>\n{instruction}\n</INSTRUCTION>"
+    )
 
-        if provider == APIProvider.ANTHROPIC:
-            client = Anthropic(api_key=api_key)
-        elif provider == APIProvider.VERTEX:
-            client = AnthropicVertex()
-        elif provider == APIProvider.BEDROCK:
-            client = AnthropicBedrock()
+    qa_system = (
+        f"{QA_SYSTEM_PROMPT}\n\n<INSTRUCTION>\n{instruction}\n</INSTRUCTION>"
+    )
+    # Overwrite the messages with the manager's plan
+    messages=[
+        {
+            "role": "user",
+            "content": 
+                    f"Given the INSTRUCTION and context, "
+                    "please provide a plan for the agent to complete the task. Please do not use any tools.",
+        }
+    ]
 
-        # Call the API
-        # we use raw_response to provide debug information to streamlit. Your
-        # implementation may be able call the SDK directly with:
-        # `response = client.messages.create(...)` instead.
-        raw_response = client.beta.messages.with_raw_response.create(
-            max_tokens=max_tokens,
-            messages=messages,
-            model=model,
-            system=system,
-            tools=tool_collection.to_params(),
-            betas=["computer-use-2024-10-22"],
-        )
+    total_sessions = 0
 
-        api_response_callback(cast(APIResponse[BetaMessage], raw_response))
+    _manager_check_progress(messages, provider, api_key, model, manager_system, api_response_callback, tool_collection, session_number=total_sessions)
 
-        response = raw_response.parse()
+    while total_sessions < 10:
+        count = 0
 
-        messages.append(
-            {
-                "role": "assistant",
-                "content": cast(list[BetaContentBlockParam], response.content),
-            }
-        )
+        while count < 5:
+            if only_n_most_recent_images:
+                _maybe_filter_to_n_most_recent_images(messages, only_n_most_recent_images)
 
-        tool_result_content: list[BetaToolResultBlockParam] = []
-        for content_block in cast(list[BetaContentBlock], response.content):
-            output_callback(content_block)
-            if content_block.type == "tool_use":
-                result = await tool_collection.run(
-                    name=content_block.name,
-                    tool_input=cast(dict[str, Any], content_block.input),
-                )
-                tool_result_content.append(
+            if provider == APIProvider.ANTHROPIC:
+                client = Anthropic(api_key=api_key)
+            elif provider == APIProvider.VERTEX:
+                client = AnthropicVertex()
+            elif provider == APIProvider.BEDROCK:
+                client = AnthropicBedrock()
+
+            # Call the API
+            # we use raw_response to provide debug information to streamlit. Your
+            # implementation may be able call the SDK directly with:
+            # `response = client.messages.create(...)` instead.
+            raw_response = client.beta.messages.with_raw_response.create(
+                max_tokens=max_tokens,
+                messages=messages,
+                model=model,
+                system=system,
+                tools=tool_collection.to_params(),
+                betas=["computer-use-2024-10-22"],
+            )
+
+            api_response_callback(cast(APIResponse[BetaMessage], raw_response), count, session_number=total_sessions)
+
+            response = raw_response.parse()
+
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": cast(list[BetaContentBlockParam], response.content),
+                }
+            )
+
+            tool_result_content: list[BetaToolResultBlockParam] = []
+            for content_block in cast(list[BetaContentBlock], response.content):
+                output_callback(content_block)
+                if content_block.type == "tool_use":
+                    result = await tool_collection.run(
+                        name=content_block.name,
+                        tool_input=cast(dict[str, Any], content_block.input),
+                    )
+                    tool_result_content.append(
                     _make_api_tool_result(result, content_block.id)
                 )
-                tool_output_callback(result, content_block.id)
+                    tool_output_callback(result, content_block.id)
 
-        if not tool_result_content:
-            return messages
+            if not tool_result_content:
+                if provider == APIProvider.ANTHROPIC:
+                    client = Anthropic(api_key=api_key)
+                elif provider == APIProvider.VERTEX:
+                    client = AnthropicVertex()
+                elif provider == APIProvider.BEDROCK:
+                    client = AnthropicBedrock()
+                # Check with QA agent if goal is met
+                qa_response = client.beta.messages.with_raw_response.create(
+                    max_tokens=max_tokens,
+                    messages=messages + [{
+                        "role": "user", 
+                        "content": f"Has the instruction goal been achieved? Please answer in JSON format."
+                    }],
+                    model=model,
+                    system=qa_system,
+                    tools=tool_collection.to_params(),
+                    betas=["computer-use-2024-10-22"]
+                )
+            
+                api_response_callback(cast(APIResponse[BetaMessage], qa_response), count, role="qa", session_number=total_sessions)
+                qa_result = qa_response.parse()
+                
+                qa_json = json.loads(qa_result.content[0].text)
+                if qa_json.get('is_complete', False):
+                    api_response_callback(None, is_done=True)  
+                    _manager_report_progress(messages, provider, api_key, model, manager_system, api_response_callback, tool_collection)
+                    return messages
+            messages.append({"content": tool_result_content, "role": "user"})
+        
+            count += 1
 
-        messages.append({"content": tool_result_content, "role": "user"})
+        messages = messages + [
+            {
+                "role": "user",
+                "content": 
+                    f"Given the INSTRUCTION and the previous steps, "
+                    "please provide a plan for the agent to complete the task. Please do not use any tools."
+                    "If the worker agent is stuck, you can ask the worker agent to search for relevent information on Google.",
+            }
+        ]
+
+        _manager_check_progress(messages, provider, api_key, model, manager_system, api_response_callback, tool_collection, session_number=total_sessions)
+
+        total_sessions += 1
+
+    _manager_report_progress(messages, provider, api_key, model, manager_system, api_response_callback, tool_collection)
 
 
 def _maybe_filter_to_n_most_recent_images(
