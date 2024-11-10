@@ -155,14 +155,14 @@ def _manager_report_progress(
     tool_collection: ToolCollection,
 ):
     
-    messages = messages + [
+    messages.append(
         {
             "role": "user",
             "content": 
                 f"Given the INSTRUCTION and what the worker agent has done, "
                 "please generate a short report on what has been done and whether the goal has been achieved.",
         }
-    ]  
+    )
 
     if provider == APIProvider.ANTHROPIC:
         client = Anthropic(api_key=api_key)
@@ -223,7 +223,7 @@ async def sampling_loop(
         f"{QA_SYSTEM_PROMPT}\n\n<INSTRUCTION>\n{instruction}\n</INSTRUCTION>"
     )
     # Overwrite the messages with the manager's plan
-    messages=[]
+    # messages=[]
 
     if rag_url:
         documents = SimpleWebPageReader(html_to_text=True).load_data([rag_url])
@@ -333,7 +333,7 @@ async def sampling_loop(
         
             count += 1
 
-        messages = messages + [
+        messages.append(
             {
                 "role": "user",
                 "content": 
@@ -341,7 +341,7 @@ async def sampling_loop(
                     "please provide a plan for the agent to complete the task. Please do not use any tools."
                     "If the worker agent is stuck, you can ask the worker agent to search for relevent information on Google.",
             }
-        ]
+        )
 
         _manager_check_progress(messages, provider, api_key, model, manager_system, api_response_callback, tool_collection, session_number=total_sessions)
 

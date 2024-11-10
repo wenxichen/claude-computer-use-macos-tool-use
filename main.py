@@ -10,7 +10,33 @@ from computer_use_demo.tools import ToolResult
 from anthropic.types.beta import BetaMessage, BetaMessageParam
 from anthropic import APIResponse
 
+import signal
+import pickle
+from pathlib import Path
+
 agentops.init(api_key="f03a808a-f077-4f37-9af0-f983707614de")
+
+def save_messages(messages):
+    """Save messages to a pickle file"""
+    Path("checkpoints").mkdir(exist_ok=True)
+    with open("checkpoints/messages.pkl", "wb") as f:
+        pickle.dump(messages, f)
+    print("\nSaved current progress to checkpoints/messages.pkl")
+
+def load_messages():
+    """Load messages from a pickle file if it exists"""
+    try:
+        with open("checkpoints/messages.pkl", "rb") as f:
+            return pickle.load(f)
+    except FileNotFoundError:
+        return None
+    
+def signal_handler(signum, frame):
+    """Handle SIGINT by saving messages and exiting"""
+    print("\nReceived interrupt signal. Saving progress...")
+    if hasattr(signal_handler, 'messages'):
+        save_messages(signal_handler.messages)
+    sys.exit(0)
 
 async def main():
     # Set up your Anthropic API key and model
@@ -20,6 +46,9 @@ async def main():
             "Please first set your API key in the ANTHROPIC_API_KEY environment variable"
         )
     provider = APIProvider.ANTHROPIC
+
+    # Set up signal handler
+    signal.signal(signal.SIGINT, signal_handler)
 
     # Check if the instruction is provided via command line arguments
     if len(sys.argv) > 1:
@@ -37,10 +66,7 @@ async def main():
 
     # Set up the initial messages
     messages: list[BetaMessageParam] = [
-        {
-            "role": "user",
-            "content": instruction,
-        }
+  
     ]
 
     # Define callbacks (you can customize these)
@@ -98,6 +124,19 @@ async def main():
                 )
             else:
                 raise ValueError(f"Invalid role: {role}")
+            
+    # Check for saved messages
+    saved_messages = load_messages()
+    if saved_messages:
+        print("Found saved progress. Would you like to continue? (y/n)")
+        if input().lower() == 'y':
+            messages = saved_messages
+            print("Continuing from saved progress...")
+        else:
+            print("Starting fresh...")
+
+    # Store messages in signal handler for access during interrupt
+    signal_handler.messages = messages
 
     # Run the sampling loop
     messages = await sampling_loop(
@@ -114,6 +153,9 @@ async def main():
         only_n_most_recent_images=10,
         max_tokens=4096,
     )
+
+    # Save final messages
+    save_messages(messages)
 
 
 if __name__ == "__main__":
