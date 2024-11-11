@@ -1,3 +1,13 @@
+# Computer Use for tools on MacOS as a team
+
+This is to use Anthropic's Computer Use to perform tasks on MacOS with multiple agents working together. This is built on top of the [Claude Computer Use Demo for MacOS](https://github.com/PallavAg/claude-computer-use-macos).
+
+The multi-agent pipeline is described here: https://docs.google.com/presentation/d/1Ua2YGQyAPQ-lg7lIAFq_q6zhwuLkC0wy3wPt6LmXAu0/edit?usp=sharing
+
+Some examples are shown in the notion notes here: https://resilient-rabbit-7f2.notion.site/Mac-Computer-Use-Tool-Use-Examples-13ae229b4ca080afb12bfed6600bf724
+
+
+---
 # Claude Computer Use Demo for MacOS
 
 This repository contains a Python script that demonstrates Anthropic's Computer Use capabilities, modified to run on MacOS without requiring a Docker container. The script allows Claude 3.5 Sonnet to perform tasks on your Mac by simulating mouse and keyboard actions as well as running bash command.
