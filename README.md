@@ -38,7 +38,7 @@ View Anthropic's docs [here](https://docs.anthropic.com/en/docs/build-with-claud
 
    Replace `CLAUDE_API_KEY` with your actual Anthropic API key. You find yours [here](https://console.anthropic.com/settings/keys).
 
-4. **Set your optional AgentOps API key as an environment variable:**
+4. **[Optional] Set your AgentOps API key as an environment variable:**
 
  ```bash
    export AGENTOPS_API_KEY="AGENTOPS_API_KEY"
