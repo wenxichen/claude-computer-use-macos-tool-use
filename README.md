@@ -1,18 +1,13 @@
 # Computer Use for tools on MacOS as a team
 
-This is to use Anthropic's Computer Use to perform tasks on MacOS with multiple agents working together. This is built on top of the [Claude Computer Use Demo for MacOS](https://github.com/PallavAg/claude-computer-use-macos).
+This is to use Anthropic's Computer Use to perform tasks on MacOS with multiple agents working together. The program runs the native MacOS. It uses Claude 3.5 Sonnet to perform tasks on your Mac by simulating mouse and keyboard actions as well as running bash command. Please use this with caution. 
+
+This is built on top of the [Claude Computer Use Demo for MacOS](https://github.com/PallavAg/claude-computer-use-macos) which was originally forked from Anthropic's [computer use demo](https://github.com/anthropics/anthropic-quickstarts/tree/main/computer-use-demo) - optimized for MacOS.
 
 The multi-agent pipeline is described here: https://docs.google.com/presentation/d/1Ua2YGQyAPQ-lg7lIAFq_q6zhwuLkC0wy3wPt6LmXAu0/edit?usp=sharing
 
 Some examples are shown in the notion notes here: https://resilient-rabbit-7f2.notion.site/Mac-Computer-Use-Tool-Use-Examples-13ae229b4ca080afb12bfed6600bf724
 
-
----
-# Claude Computer Use Demo for MacOS
-
-This repository contains a Python script that demonstrates Anthropic's Computer Use capabilities, modified to run on MacOS without requiring a Docker container. The script allows Claude 3.5 Sonnet to perform tasks on your Mac by simulating mouse and keyboard actions as well as running bash command.
-
-Forked from Anthropic's [computer use demo](https://github.com/anthropics/anthropic-quickstarts/tree/main/computer-use-demo) - optimized for MacOS.
 View Anthropic's docs [here](https://docs.anthropic.com/en/docs/build-with-claude/computer-use).
 
 > [!WARNING]  
@@ -23,16 +18,16 @@ View Anthropic's docs [here](https://docs.anthropic.com/en/docs/build-with-claud
 1. **Clone the repository:**
 
    ```bash
-   git clone https://github.com/PallavAg/claude-computer-use-macos.git
-   cd claude-computer-use-macos
+   git clone https://github.com/wenxichen/claude-computer-use-macos-tool-use.git
+   cd claude-computer-use-macos-tool-use
    ```
 
 2. **Create a virtual environment + install dependencies:**
 
    ```bash
-   python3.12 -m venv venv
-   source venv/bin/activate
-   pip3.12 install -r requirements.txt
+   conda create -n computer-use python=3.13
+   conda activate computer-use
+   pip install -r requirements.txt
    ```
 
 3. **Set your Anthropic API key as an environment variable:**
@@ -43,7 +38,15 @@ View Anthropic's docs [here](https://docs.anthropic.com/en/docs/build-with-claud
 
    Replace `CLAUDE_API_KEY` with your actual Anthropic API key. You find yours [here](https://console.anthropic.com/settings/keys).
 
-4. **Grant Accessibility Permissions:**
+4. **Set your optional AgentOps API key as an environment variable:**
+
+ ```bash
+   export AGENTOPS_API_KEY="AGENTOPS_API_KEY"
+   ```
+
+   Replace `AGENTOPS_API_KEY` with your actual AgentOps API key. You find yours [here](https://app.agentops.ai/settings/projects).
+
+5. **Grant Accessibility Permissions:**
 
    The script uses `pyautogui` to control mouse and keyboard events. On MacOS, you need to grant accessibility permissions. These popups should show automatically the first time you run the script so you can skip this step. But to manually provide permissions:
 
@@ -58,12 +61,10 @@ You can run the script by passing the instruction directly via the command line 
 **Example using command line instruction:**
 
 ```bash
-python3.12 main.py 'Open Safari and look up Anthropic'
+python main.py 'Open Safari and look up Anthropic'
 ```
 
 Replace `'Open Safari and look up Anthropic'` with your desired instruction.
-
-**Note:** If you do not provide an instruction via the command line, the script will use the default instruction specified in `main.py`. You can edit `main.py` to change this default instruction.
 
 ## Exiting the Script
 

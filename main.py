@@ -3,7 +3,7 @@ import os
 import sys
 import json
 import base64
-import agentops
+
 
 from computer_use_demo.loop import sampling_loop, APIProvider
 from computer_use_demo.tools import ToolResult
@@ -14,7 +14,16 @@ import signal
 import pickle
 from pathlib import Path
 
-agentops.init(api_key="f03a808a-f077-4f37-9af0-f983707614de")
+agentops_api_key = os.getenv("AGENTOPS_API_KEY", "YOUR_API_KEY_HERE")
+if agentops_api_key == "YOUR_API_KEY_HERE":
+    print(
+        "skipping agentops init as no key is set."
+    )
+    USE_AGENTOPS = False
+else:
+    import agentops
+    agentops.init(api_key=agentops_api_key)
+    USE_AGENTOPS = True
 
 def save_messages(messages):
     """Save messages to a pickle file"""
@@ -30,6 +39,12 @@ def load_messages():
             return pickle.load(f)
     except FileNotFoundError:
         return None
+    
+def remove_checkpoints():
+    """Remove all checkpoints"""
+    for file in Path("checkpoints").glob("*"):
+        file.unlink()
+    print("Checkpoints removed.")
     
 def signal_handler(signum, frame):
     """Handle SIGINT by saving messages and exiting"""
@@ -134,6 +149,7 @@ async def main():
             print("Continuing from saved progress...")
         else:
             print("Starting fresh...")
+            remove_checkpoints()
 
     # Store messages in signal handler for access during interrupt
     signal_handler.messages = messages
@@ -164,4 +180,5 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Encountered Error:\n{e}")
 
-    agentops.end_session('Success')
+    if USE_AGENTOPS:    
+        agentops.end_session('Success')
