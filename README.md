@@ -10,8 +10,31 @@ Some examples are shown in the notion notes here: https://resilient-rabbit-7f2.n
 
 View Anthropic's docs [here](https://docs.anthropic.com/en/docs/build-with-claude/computer-use).
 
-> [!WARNING]  
-> Use this script with caution. Allowing Claude to control your computer can be risky. By running this script, you assume all responsibility and liability.
+> [!CAUTION]
+> - **Security Risks:** This script allows claude to control your computer's mouse and keyboard and run bash commands. Use it at your own risk.
+> - **Responsibility:** By running this script, you assume all responsibility and liability for any results.
+> - **AgentOps:** This script uses AgentOps to track the usage of the tool. If you do not want to track the usage, please do not set the `AGENTOPS_API_KEY` environment variable.
+>
+> Computer use is a beta feature. Please be aware that computer use poses unique risks that are distinct from standard API features or chat interfaces. These risks are heightened when using computer use to interact with the internet. To minimize risks, consider taking precautions such as:
+>
+> 1. Use a dedicated virtual machine or container with minimal privileges to prevent direct system attacks or accidents.
+> 2. Avoid giving the model access to sensitive data, such as account login information, to prevent information theft.
+> 3. Limit internet access to an allowlist of domains to reduce exposure to malicious content.
+> 4. Ask a human to confirm decisions that may result in meaningful real-world consequences as well as any tasks requiring affirmative consent, such as accepting cookies, executing financial transactions, or agreeing to terms of service.
+>
+> In some circumstances, Claude will follow commands found in content even if it conflicts with the user's instructions. For example, instructions on webpages or contained in images may override user instructions or cause Claude to make mistakes. We suggest taking precautions to isolate Claude from sensitive data and actions to avoid risks related to prompt injection.
+>
+> Finally, please inform end users of relevant risks and obtain their consent prior to enabling computer use in your own products.
+> ---
+> This program focuses on using browser and web tools to perform tasks. One way to curb the risks is to limit the internet access to a whitelist of domains. You can do this by setting the allowed websites by following the steps below.
+> 1. Open System Preferences
+> 2. Select Screen Time
+> 3. Select Content & Privacy
+> 4. Toggle on Content & Privacy
+> 5. Go to App Store, Media, Web, & Games
+> 6. Click on Access to Web Content
+> 7. Select Allowed Websites Only
+> 8. Click Done
 
 ## Installation and Setup
 
@@ -71,7 +94,3 @@ Replace `'Open Safari and look up Anthropic'` with your desired instruction.
 You can quit the script at any time by pressing `Ctrl+C` in the terminal.
 
 ## ⚠ Disclaimer
-
-> [!CAUTION]
-> - **Security Risks:** This script allows claude to control your computer's mouse and keyboard and run bash commands. Use it at your own risk.
-> - **Responsibility:** By running this script, you assume all responsibility and liability for any results.
