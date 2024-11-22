@@ -59,20 +59,24 @@ PROVIDER_TO_DEFAULT_MODEL_NAME: dict[APIProvider, str] = {
 # We encourage modifying this system prompt to ensure the model has context for the
 # environment it is running in, and to provide any additional information that may be
 # helpful for the task at hand.
-SYSTEM_PROMPT = f"""<SYSTEM_CAPABILITY>
+# <SYSTEM_CAPABILITY>
+# * You can use the bash tool to execute commands in the terminal.
+# * To open applications, you can use the `open` command in the bash tool. For example, `open -a Safari` to open the Safari browser.
+# * When using your bash tool with commands that are expected to output very large quantities of text, redirect the output into a temporary file and use `str_replace_editor` or `grep -n -B <lines before> -A <lines after> <query> <filename>` to inspect the output.
+# * When using your computer function calls, they may take a while to run and send back to you. Where possible and feasible, try to chain multiple of these calls into one function call request.
+# <IMPORTANT>
+# * If the item you are looking at is a PDF, and after taking a single screenshot of the PDF it seems you want to read the entire document, instead of trying to continue to read the PDF from your screenshots and navigation, determine the URL, use `curl` to download the PDF, install and use `pdftotext` (you may need to install it via `brew install poppler`) to convert it to a text file, and then read that text file directly with your `str_replace_editor` tool.
+WORKER_SYSTEM_PROMPT = f"""<SYSTEM_CAPABILITY>
 * You are a worker agent utilizing a MacOS computer using {platform.machine()} architecture with internet access.
 * You have a manager that may provide you with plan and suggestions for how to complete the task.
-* You can use the bash tool to execute commands in the terminal.
-* To open applications, you can use the `open` command in the bash tool. For example, `open -a Safari` to open the Safari browser.
-* When using your bash tool with commands that are expected to output very large quantities of text, redirect the output into a temporary file and use `str_replace_editor` or `grep -n -B <lines before> -A <lines after> <query> <filename>` to inspect the output.
+* You and your manager will have access to the screen of the computer.
 * When viewing a page, it can be helpful to zoom out so that you can see everything on the page. Alternatively, ensure you scroll down to see everything before deciding something isn't available.
-* When using your computer function calls, they may take a while to run and send back to you. Where possible and feasible, try to chain multiple of these calls into one function call request.
+* When instruction is provided to you through the text editor, please read it carefully, and follow it along with the manager's plan to complete the task.
 * The current date is {datetime.today().strftime('%A, %B %-d, %Y')}.
 </SYSTEM_CAPABILITY>
 
 <IMPORTANT>
 * When using Safari or other applications, if any startup wizards or prompts appear, **IGNORE THEM**. Do not interact with them. Instead, click on the address bar or the area where you can enter commands or URLs, and proceed with your task.
-* If the item you are looking at is a PDF, and after taking a single screenshot of the PDF it seems you want to read the entire document, instead of trying to continue to read the PDF from your screenshots and navigation, determine the URL, use `curl` to download the PDF, install and use `pdftotext` (you may need to install it via `brew install poppler`) to convert it to a text file, and then read that text file directly with your `str_replace_editor` tool.
 </IMPORTANT>
 """
 
@@ -80,7 +84,7 @@ MANAGER_SYSTEM_PROMPT = f"""<SYSTEM_CAPABILITY>
 * You are a manager of two agents: one worker agent that utilizes a MacOS computer using {platform.machine()} architecture with internet access, and one quality assurance agent that will review the worker agent's output.
 * You and the agents will have access to the screen of the computer.
 * You can evaluate the goal and the progress from the agents to decide what the agents should do next.
-* When you are not sure what the agent should do next, you can ask the agent to search for relevent information on Google.
+* When you are not sure what the agent should do next, you can ask the agent to search for relevent information on Google using the firefox browser.
 * The current date is {datetime.today().strftime('%A, %B %-d, %Y')}.
 </SYSTEM_CAPABILITY>
 
@@ -91,7 +95,8 @@ MANAGER_SYSTEM_PROMPT = f"""<SYSTEM_CAPABILITY>
 
 QA_SYSTEM_PROMPT = f"""<SYSTEM_CAPABILITY>
 * You are a quality assurance agent.
-* You will review the worker agent's output and determine if it is correct and complete and meets the goal defined by the original instruction.
+* You are working with a worker agent and a manager. All three of you will have access to the screen of the computer.
+* You will review the worker agent's output and determine if the task defined by the original instruction is completed.
 * The current date is {datetime.today().strftime('%A, %B %-d, %Y')}.
 * Please output in JSON format with the following keys:
     * `is_complete`: boolean indicating if the worker agent's output is correct and complete and meets the goal defined by the original instruction.
@@ -122,12 +127,29 @@ def _manager_check_progress(
         client = AnthropicVertex()
     elif provider == APIProvider.BEDROCK:
         client = AnthropicBedrock()
+
+    if session_number > 0:
+        user_message = {
+            "role": "user",
+            "content": 
+                f"Given the INSTRUCTION, previous steps, and the previous plan, "
+                "please adjust the plan for the agent to continue completing the task. Please do not use any tools. "
+                "If the worker agent is stuck, you can ask the worker agent to search for relevent information on Google.",
+        }
+    else:
+        user_message = {
+            "role": "user",
+            "content": 
+                f"Given the INSTRUCTION and context, "
+                "please provide a plan for the agent to complete the task. Please do not use any tools.",
+        }
+        
     
     # Call the API to get some planning and context
     raw_response = client.beta.messages.with_raw_response.create(
         max_tokens=1024,
         system=manager_system,
-        messages=messages,
+        messages=messages + [user_message],
         tools=tool_collection.to_params(),
         model=model,
         betas=["computer-use-2024-10-22"]
@@ -137,13 +159,7 @@ def _manager_check_progress(
 
     response = raw_response.parse()
 
-    messages.append(
-        {
-            "role": "user",
-            "content": f"Given the instructions above, here is the plan provided by the manager: {response.content}"
-            "\nPlease follow the plan to complete the task.",
-        }
-    )
+    return response.content[0].text
 
 def _manager_report_progress(
     messages: list[BetaMessageParam], 
@@ -154,15 +170,6 @@ def _manager_report_progress(
     api_response_callback: Callable[[APIResponse[BetaMessage]], None],
     tool_collection: ToolCollection,
 ):
-    
-    messages.append(
-        {
-            "role": "user",
-            "content": 
-                f"Given the INSTRUCTION and what the worker agent has done, "
-                "please generate a short report on what has been done and whether the goal has been achieved.",
-        }
-    )
 
     if provider == APIProvider.ANTHROPIC:
         client = Anthropic(api_key=api_key)
@@ -175,7 +182,12 @@ def _manager_report_progress(
     raw_response = client.beta.messages.with_raw_response.create(
         max_tokens=1024,
         system=manager_system,
-        messages=messages,
+        messages=messages + [{
+            "role": "user",
+            "content": 
+                f"Given the INSTRUCTION, what the worker agent has done, and the QA agent's assessment (if any), "
+                "please generate a short report on what has been done and whether the goal has been achieved.",
+         }],
         tools=tool_collection.to_params(),
         model=model,
         betas=["computer-use-2024-10-22"]
@@ -207,12 +219,9 @@ async def sampling_loop(
         BashTool(),
         EditTool(),
     )
-    # system = (
-    #     f"{SYSTEM_PROMPT}{' ' + system_prompt_suffix if system_prompt_suffix else ''}"
-    # )
 
     system = (
-        f"{SYSTEM_PROMPT}\n\n<INSTRUCTION>\n{instruction}\n</INSTRUCTION>"
+        f"{WORKER_SYSTEM_PROMPT}\n\n<INSTRUCTION>\n{instruction}\n</INSTRUCTION>"
     )
 
     manager_system = (
@@ -239,18 +248,30 @@ async def sampling_loop(
         )
         print(relevent_context)
 
-    messages.append({
-            "role": "user",
-            "content": 
-                    f"Given the INSTRUCTION and context, "
-                    "please provide a plan for the agent to complete the task. Please do not use any tools.",
-        })
-
     total_sessions = 0
 
-    _manager_check_progress(messages, provider, api_key, model, manager_system, api_response_callback, tool_collection, session_number=total_sessions)
-
     while total_sessions < 10:
+
+        manager_plan = _manager_check_progress(messages, provider, api_key, model, manager_system, api_response_callback, tool_collection, session_number=total_sessions)
+
+        if total_sessions == 0:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": f"Given the INSTRUCTION, here is a plan provided by the manager:\n{manager_plan}"
+                    "\n\nPlease follow the plan to complete the task.",
+                }
+            )
+
+        else:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": f"Given the INSTRUCTION and what you have done so far, here is an updated plan provided by the manager:\n{manager_plan}"
+                    "\n\nPlease follow the plan to complete the task.",
+                }
+            )
+
         count = 0
 
         while count < 5:
@@ -326,24 +347,13 @@ async def sampling_loop(
                 
                 qa_json = json.loads(qa_result.content[0].text)
                 if qa_json.get('is_complete', False):
-                    api_response_callback(None, is_done=True)  
+                    api_response_callback(None, is_done=True)
+                    messages.append({"content": qa_result.content[0].text, "role": "assistant"})  
                     _manager_report_progress(messages, provider, api_key, model, manager_system, api_response_callback, tool_collection)
                     return messages
             messages.append({"content": tool_result_content, "role": "user"})
         
             count += 1
-
-        messages.append(
-            {
-                "role": "user",
-                "content": 
-                    f"Given the INSTRUCTION and the previous steps, "
-                    "please provide a plan for the agent to complete the task. Please do not use any tools."
-                    "If the worker agent is stuck, you can ask the worker agent to search for relevent information on Google.",
-            }
-        )
-
-        _manager_check_progress(messages, provider, api_key, model, manager_system, api_response_callback, tool_collection, session_number=total_sessions)
 
         total_sessions += 1
 
