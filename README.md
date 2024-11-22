@@ -25,6 +25,7 @@ View Anthropic's docs [here](https://docs.anthropic.com/en/docs/build-with-claud
 > In some circumstances, Claude will follow commands found in content even if it conflicts with the user's instructions. For example, instructions on webpages or contained in images may override user instructions or cause Claude to make mistakes. We suggest taking precautions to isolate Claude from sensitive data and actions to avoid risks related to prompt injection.
 >
 > Finally, please inform end users of relevant risks and obtain their consent prior to enabling computer use in your own products.
+>
 > ---
 > This program focuses on using browser and web tools to perform tasks. One way to curb the risks is to limit the internet access to a whitelist of domains. You can do this by setting the allowed websites by following the steps below.
 > 1. Open System Preferences
