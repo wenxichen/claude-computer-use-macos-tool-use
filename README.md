@@ -35,7 +35,8 @@ View Anthropic's docs [here](https://docs.anthropic.com/en/docs/build-with-claud
 > 5. Go to App Store, Media, Web, & Games
 > 6. Click on Access to Web Content
 > 7. Select Allowed Websites Only
-> 8. Click Done
+> 8. Click on Customize to customize the allowed websites
+> 9. Click Done
 
 ## Installation and Setup
 
