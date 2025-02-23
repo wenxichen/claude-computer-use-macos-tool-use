@@ -23,11 +23,13 @@ from anthropic.types.beta import (
     BetaToolResultBlockParam,
 )
 
+from openai import OpenAI
+
 from .tools import BashTool, ComputerTool, EditTool, ToolCollection, ToolResult
 
 from llama_index.core import SummaryIndex
 from llama_index.readers.web import SimpleWebPageReader
-import os
+    
 
 ######
 # RAG logging
@@ -38,20 +40,40 @@ logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logging.getLogger().addHandler(logging.StreamHandler(stream=sys.stdout))
 ######
 
-BETA_FLAG = "computer-use-2024-10-22"
+# BETA_FLAG = "computer-use-2024-10-22"
 
 
-class APIProvider(StrEnum):
-    ANTHROPIC = "anthropic"
-    BEDROCK = "bedrock"
-    VERTEX = "vertex"
+# class APIProvider(StrEnum):
+#     ANTHROPIC = "anthropic"
+#     BEDROCK = "bedrock"
+#     VERTEX = "vertex"
 
+# PROVIDER_TO_DEFAULT_MODEL_NAME: dict[APIProvider, str] = {
+#     APIProvider.ANTHROPIC: "claude-3-5-sonnet-20241022",
+#     APIProvider.BEDROCK: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+#     APIProvider.VERTEX: "claude-3-5-sonnet-v2@20241022",
+# }
 
-PROVIDER_TO_DEFAULT_MODEL_NAME: dict[APIProvider, str] = {
-    APIProvider.ANTHROPIC: "claude-3-5-sonnet-20241022",
-    APIProvider.BEDROCK: "anthropic.claude-3-5-sonnet-20241022-v2:0",
-    APIProvider.VERTEX: "claude-3-5-sonnet-v2@20241022",
-}
+# if provider == APIProvider.ANTHROPIC:
+#     client = Anthropic(api_key=api_key)
+# elif provider == APIProvider.VERTEX:
+#     client = AnthropicVertex()
+# elif provider == APIProvider.BEDROCK:
+#     client = AnthropicBedrock()
+
+# ================================
+# TODO: Support chatbot query and update.
+# 1. check if chatbot is enabled
+# 2. if chatbot is enabled, query the chatbot for information about the task
+# 3. if chatbot returns information, check if further query is needed
+# 4. if further query is needed, query for further information
+# 5. use the information to generate the plan
+# 6. carry out task following the plan
+# 7. if plan is not successful or need human interaction, update chatbot with new information
+# The idea is the chatbot can be automatically updated from user actions or interaction,
+# use only simple flow and Q&A for now
+# ================================
+
 
 
 # This system prompt is optimized for the Docker environment in this repository and
@@ -110,23 +132,90 @@ QA_SYSTEM_PROMPT = f"""<SYSTEM_CAPABILITY>
 </IMPORTANT>
 """
 
+def _print_chatbot_messages(messages: list[str], role: str):
+    for message in messages:
+        print(f"{role}:", message)
+
+def _store_chatbot_messages(all_chatbot_messages: list[str], messages: list[str], role: str):
+    for message in messages:
+        all_chatbot_messages.append((role, message))
+
+def _user_message_to_check_further(instruction: str, all_chatbot_messages: list[str]):
+    chatbot_messages = "\n".join([f"{role}: {message}" for role, message in all_chatbot_messages])
+    return (f"Given the INSTRUCTION and response from Juji chatbot below, please advise if further query is needed from the chatbot."
+            f"\n\nINSTRUCTION: {instruction}"
+            f"\n\nquery history: \"\"\"\n{chatbot_messages}\n\"\"\""
+            f"\n\nPlease respond in JSON format with the following keys: "
+            f"\n\t- \"further query needed\": boolean indicating if further query is needed"
+            f"\n\t- \"chatbot does not know\": boolean indicating if the chatbot does not know the answer"
+            f"\n\t- \"query suggestion\": string providing a suggestion for a query to Juji"
+            f"\n\nHere are some examples of JSON output:"
+            f"\n\t{{\"further query needed\": true, \"chatbot does not know\": false, \"query suggestion\": \"What is the capital of France?\"}}"
+            f"\n\t{{\"further query needed\": false, \"chatbot does not know\": true, \"query suggestion\": \"\"}}"
+            f"\n\t{{\"further query needed\": false, \"chatbot does not know\": false, \"query suggestion\": \"\"}}")
+
+def _query_chatbot(chatbot: Chatbot, instruction: str, text_query_client: OpenAI):
+    """Query the chatbot for information about the task"""
+    all_chatbot_messages = []
+    further_query_count = 0
+
+    print("Querying Juji for info about: ", instruction)
+    participation = chatbot.start_chat()
+    juji_messages = participation.get_messages()
+    _print_chatbot_messages(juji_messages, "Juji")
+    _store_chatbot_messages(all_chatbot_messages, juji_messages, "Juji")
+
+    send_to_juji = "Do you know anything about: " + instruction
+    print("You:", send_to_juji)
+    _store_chatbot_messages(all_chatbot_messages, [send_to_juji], "You")
+    juji_messages = participation.send_chat_msg(send_to_juji)
+    _print_chatbot_messages(juji_messages, "Juji")
+    _store_chatbot_messages(all_chatbot_messages, juji_messages, "Juji")
+
+    # check if further query is needed
+    user_message = _user_message_to_check_further(instruction, all_chatbot_messages)
+    response = text_query_client.chat.completions.create(
+        model="gpt-4o-mini",
+        response_format={"type": "json_object"},
+        messages=[{"role": "user", "content": user_message}],
+    )
+    print("Text query response:", response)
+    response_json = json.loads(response.choices[0].message.content)
+
+    while further_query_count < 3 and response_json.get("further query needed", False) and not response_json.get("chatbot does not know", False) and response_json.get("query suggestion", ""):
+        print("You:", response_json.get("query suggestion"))
+        further_query_count += 1
+        _store_chatbot_messages(all_chatbot_messages, [response_json.get("query suggestion")], "You")
+        juji_messages = participation.send_chat_msg(response_json.get("query suggestion"))
+        _print_chatbot_messages(juji_messages, "Juji")
+        _store_chatbot_messages(all_chatbot_messages, juji_messages, "Juji")
+        user_message = _user_message_to_check_further(instruction, all_chatbot_messages)
+        response = text_query_client.chat.completions.create(
+            model="gpt-4o-mini",
+            response_format={"type": "json_object"},
+            messages=[{"role": "user", "content": user_message}],
+        )
+        print("Text query response:", response)
+        response_json = json.loads(response.choices[0].message.content)
+    
+    print("End of intial chatbot query")
+
+    return all_chatbot_messages
+
+
+
 def _manager_check_progress(
         messages: list[BetaMessageParam], 
-        provider: APIProvider, 
-        api_key: str, 
+        computer_use_client: Anthropic, 
         model: str, 
         manager_system: str, 
         api_response_callback: Callable[[APIResponse[BetaMessage]], None],
         tool_collection: ToolCollection,
-        session_number: int
+        session_number: int,
+        all_chatbot_messages: list[str]
 ):
     
-    if provider == APIProvider.ANTHROPIC:
-        client = Anthropic(api_key=api_key)
-    elif provider == APIProvider.VERTEX:
-        client = AnthropicVertex()
-    elif provider == APIProvider.BEDROCK:
-        client = AnthropicBedrock()
+
 
     if session_number > 0:
         user_message = {
@@ -137,16 +226,29 @@ def _manager_check_progress(
                 "If the worker agent is stuck, you can ask the worker agent to search for relevent information on Google.",
         }
     else:
-        user_message = {
-            "role": "user",
-            "content": 
-                f"Given the INSTRUCTION and context, "
-                "please provide a plan for the agent to complete the task. Please do not use any tools.",
-        }
-        
+
+        # if Juji returns info, use it to generate the plan
+        if all_chatbot_messages:
+            initial_chatbot_query_messages = "\n".join([f"{role}: {message}" for role, message in all_chatbot_messages])
+            user_message = {
+                "role": "user",
+                "content": 
+                    (f"Given the INSTRUCTION and context, as well as the following interaction history between you and Juji, "
+                    f"\n\ninteraction history: \"\"\"\n{initial_chatbot_query_messages}\n\"\"\""
+                    f"please provide a plan for the agent to complete the task. Please do not use any tools."
+                    )
+            }
+        else:
+            user_message = {
+                "role": "user",
+                "content": 
+                    f"Given the INSTRUCTION and context, "
+                    "please provide a plan for the agent to complete the task. Please do not use any tools.",
+            }
     
     # Call the API to get some planning and context
-    raw_response = client.beta.messages.with_raw_response.create(
+    print("User message:", user_message)
+    raw_response = computer_use_client.beta.messages.with_raw_response.create(
         max_tokens=1024,
         system=manager_system,
         messages=messages + [user_message],
@@ -163,23 +265,15 @@ def _manager_check_progress(
 
 def _manager_report_progress(
     messages: list[BetaMessageParam], 
-    provider: APIProvider, 
-    api_key: str, 
+    computer_use_client: Anthropic, 
     model: str, 
     manager_system: str,
     api_response_callback: Callable[[APIResponse[BetaMessage]], None],
     tool_collection: ToolCollection,
 ):
-
-    if provider == APIProvider.ANTHROPIC:
-        client = Anthropic(api_key=api_key)
-    elif provider == APIProvider.VERTEX:
-        client = AnthropicVertex()
-    elif provider == APIProvider.BEDROCK:
-        client = AnthropicBedrock()
     
     # Call the API to get some planning and context
-    raw_response = client.beta.messages.with_raw_response.create(
+    raw_response = computer_use_client.beta.messages.with_raw_response.create(
         max_tokens=1024,
         system=manager_system,
         messages=messages + [{
@@ -199,17 +293,17 @@ def _manager_report_progress(
 async def sampling_loop(
     *,
     model: str,
-    provider: APIProvider,
-    system_prompt_suffix: str,
+    computer_use_client: Anthropic,
+    text_query_client: OpenAI,
     messages: list[BetaMessageParam],
     instruction: str,
     output_callback: Callable[[BetaContentBlock], None],
     tool_output_callback: Callable[[ToolResult, str], None],
     api_response_callback: Callable[[APIResponse[BetaMessage]], None],
-    api_key: str,
     only_n_most_recent_images: int | None = None,
     max_tokens: int = 4096,
     rag_url: str | None = None,
+    chatbot_link: str | None = None,
 ):
     """
     Agentic sampling loop for the assistant/tool interaction of computer use.
@@ -248,11 +342,17 @@ async def sampling_loop(
         )
         print(relevent_context)
 
+    all_chatbot_messages = []
+    if chatbot_link:
+        from juji_python_sdk import Chatbot
+        chatbot = Chatbot(chatbot_link)
+        all_chatbot_messages = _query_chatbot(chatbot, instruction, text_query_client)
+
     total_sessions = 0
 
     while total_sessions < 10:
 
-        manager_plan = _manager_check_progress(messages, provider, api_key, model, manager_system, api_response_callback, tool_collection, session_number=total_sessions)
+        manager_plan = _manager_check_progress(messages, computer_use_client, model, manager_system, api_response_callback, tool_collection, session_number=total_sessions, all_chatbot_messages=all_chatbot_messages)
 
         if total_sessions == 0:
             messages.append(
@@ -278,18 +378,11 @@ async def sampling_loop(
             if only_n_most_recent_images:
                 _maybe_filter_to_n_most_recent_images(messages, only_n_most_recent_images)
 
-            if provider == APIProvider.ANTHROPIC:
-                client = Anthropic(api_key=api_key)
-            elif provider == APIProvider.VERTEX:
-                client = AnthropicVertex()
-            elif provider == APIProvider.BEDROCK:
-                client = AnthropicBedrock()
-
             # Call the API
             # we use raw_response to provide debug information to streamlit. Your
             # implementation may be able call the SDK directly with:
             # `response = client.messages.create(...)` instead.
-            raw_response = client.beta.messages.with_raw_response.create(
+            raw_response = computer_use_client.beta.messages.with_raw_response.create(
                 max_tokens=max_tokens,
                 messages=messages,
                 model=model,
@@ -318,19 +411,13 @@ async def sampling_loop(
                         tool_input=cast(dict[str, Any], content_block.input),
                     )
                     tool_result_content.append(
-                    _make_api_tool_result(result, content_block.id)
-                )
+                        _make_api_tool_result(result, content_block.id)
+                    )
                     tool_output_callback(result, content_block.id)
 
             if not tool_result_content:
-                if provider == APIProvider.ANTHROPIC:
-                    client = Anthropic(api_key=api_key)
-                elif provider == APIProvider.VERTEX:
-                    client = AnthropicVertex()
-                elif provider == APIProvider.BEDROCK:
-                    client = AnthropicBedrock()
                 # Check with QA agent if goal is met
-                qa_response = client.beta.messages.with_raw_response.create(
+                qa_response = computer_use_client.beta.messages.with_raw_response.create(
                     max_tokens=max_tokens,
                     messages=messages + [{
                         "role": "user", 
@@ -349,7 +436,7 @@ async def sampling_loop(
                 if qa_json.get('is_complete', False):
                     api_response_callback(None, is_done=True)
                     messages.append({"content": qa_result.content[0].text, "role": "assistant"})  
-                    _manager_report_progress(messages, provider, api_key, model, manager_system, api_response_callback, tool_collection)
+                    _manager_report_progress(messages, computer_use_client, model, manager_system, api_response_callback, tool_collection)
                     return messages
             messages.append({"content": tool_result_content, "role": "user"})
         
@@ -357,7 +444,7 @@ async def sampling_loop(
 
         total_sessions += 1
 
-    _manager_report_progress(messages, provider, api_key, model, manager_system, api_response_callback, tool_collection)
+    _manager_report_progress(messages, computer_use_client, model, manager_system, api_response_callback, tool_collection)
 
 
 def _maybe_filter_to_n_most_recent_images(

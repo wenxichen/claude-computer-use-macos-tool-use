@@ -1,19 +1,37 @@
 import asyncio
 import os
 import sys
-import json
-import base64
-
-
-from computer_use_demo.loop import sampling_loop, APIProvider
-from computer_use_demo.tools import ToolResult
-from anthropic.types.beta import BetaMessage, BetaMessageParam
-from anthropic import APIResponse
-
+import dotenv
 import signal
-import pickle
-from pathlib import Path
 
+from anthropic import Anthropic
+from openai import OpenAI
+from computer_use_demo.loop import sampling_loop
+from anthropic.types.beta import BetaMessageParam
+
+from computer_use_demo.utils import save_messages, load_messages, remove_checkpoints, output_callback, tool_output_callback, api_response_callback
+
+dotenv.load_dotenv()
+
+# ================================
+# Basic setup
+# Set up your Anthropic API key and model
+api_key = os.getenv("ANTHROPIC_API_KEY", "YOUR_API_KEY_HERE")
+if api_key == "YOUR_API_KEY_HERE":
+    raise ValueError(
+        "Please first set your API key in the ANTHROPIC_API_KEY environment variable or in the .env file."
+    )
+computer_use_client = Anthropic(api_key=api_key)
+
+# Set up OpenAI API key
+openai_api_key = os.getenv("OPENAI_API_KEY", "YOUR_API_KEY_HERE")
+if openai_api_key == "YOUR_API_KEY_HERE":
+    raise ValueError(
+        "Please first set your API key in the OPENAI_API_KEY environment variable or in the .env file."
+    )
+text_query_client = OpenAI(api_key=openai_api_key)
+
+# Set up your AgentOps API key
 agentops_api_key = os.getenv("AGENTOPS_API_KEY", "YOUR_API_KEY_HERE")
 if agentops_api_key == "YOUR_API_KEY_HERE":
     print(
@@ -25,27 +43,12 @@ else:
     agentops.init(api_key=agentops_api_key)
     USE_AGENTOPS = True
 
-def save_messages(messages):
-    """Save messages to a pickle file"""
-    Path("checkpoints").mkdir(exist_ok=True)
-    with open("checkpoints/messages.pkl", "wb") as f:
-        pickle.dump(messages, f)
-    print("\nSaved current progress to checkpoints/messages.pkl")
+chatbot_link = os.getenv("CHATBOT_LINK")
+if not chatbot_link:
+    print(
+        "skipping chatbot init as no link is set."
+    )
 
-def load_messages():
-    """Load messages from a pickle file if it exists"""
-    try:
-        with open("checkpoints/messages.pkl", "rb") as f:
-            return pickle.load(f)
-    except FileNotFoundError:
-        return None
-    
-def remove_checkpoints():
-    """Remove all checkpoints"""
-    for file in Path("checkpoints").glob("*"):
-        file.unlink()
-    print("Checkpoints removed.")
-    
 def signal_handler(signum, frame):
     """Handle SIGINT by saving messages and exiting"""
     print("\nReceived interrupt signal. Saving progress...")
@@ -53,28 +56,25 @@ def signal_handler(signum, frame):
         save_messages(signal_handler.messages)
     sys.exit(0)
 
-async def main():
-    # Set up your Anthropic API key and model
-    api_key = os.getenv("ANTHROPIC_API_KEY", "YOUR_API_KEY_HERE")
-    if api_key == "YOUR_API_KEY_HERE":
-        raise ValueError(
-            "Please first set your API key in the ANTHROPIC_API_KEY environment variable"
-        )
-    provider = APIProvider.ANTHROPIC
+# Set up signal handler
+signal.signal(signal.SIGINT, signal_handler)
 
-    # Set up signal handler
-    signal.signal(signal.SIGINT, signal_handler)
-
-    # Check if the instruction is provided via command line arguments
-    if len(sys.argv) > 1:
-        instruction = " ".join(sys.argv[1:])
-        if len(sys.argv) > 2:
-            rag_url = sys.argv[2]
-        else:
-            rag_url = None  
+# Check if the instruction is provided via command line arguments
+if len(sys.argv) > 1:
+    instruction = sys.argv[1]
+    if len(sys.argv) > 2:
+        rag_url = sys.argv[2]
     else:
-        instruction = "Save an image of a cat to the desktop."
-        rag_url = None
+        rag_url = None  
+else:
+    instruction = "If a text editor is opened on the screen with tasks or steps to complete, please follow the instructions and complete the tasks using the broswer that is already opened. Otherwise, please do nothing."
+    rag_url = None
+
+# ================================
+
+
+async def main():
+
     print(
         f"Starting Claude 'Computer Use'.\nPress ctrl+c to stop.\nInstructions provided: '{instruction}'"
     )
@@ -83,63 +83,7 @@ async def main():
     messages: list[BetaMessageParam] = [
   
     ]
-
-    # Define callbacks (you can customize these)
-    def output_callback(content_block):
-        if isinstance(content_block, dict) and content_block.get("type") == "text":
-            print("Assistant:", content_block.get("text"))
-
-    def tool_output_callback(result: ToolResult, tool_use_id: str):
-        if result.output:
-            print(f"> Tool Output [{tool_use_id}]:", result.output)
-        if result.error:
-            print(f"!!! Tool Error [{tool_use_id}]:", result.error)
-        if result.base64_image:
-            # Save the image to a file if needed
-            os.makedirs("screenshots", exist_ok=True)
-            image_data = result.base64_image
-            with open(f"screenshots/screenshot_{tool_use_id}.png", "wb") as f:
-                f.write(base64.b64decode(image_data))
-            print(f"Took screenshot screenshot_{tool_use_id}.png")
-
-    def api_response_callback(response: APIResponse[BetaMessage], step: int=None, role: str = "worker", is_done: bool = False, final_report: str = None, session_number: int = None):
-        if is_done:
-            print("\n---------------\nQA think it is Done")
-            return
-        else:
-            if role == "manager":
-                if final_report:
-                    print(
-                        "\n================\nManager",
-                        "\nFinal Report:\n",
-                        final_report,
-                        "\n================\n",
-                    )
-                else:
-                    print(
-                        "\n---------------\nSession: ", session_number+1, " | Manager",
-                        "\nAPI Response:\n",
-                        json.dumps(json.loads(response.text)["content"], indent=4),  # type: ignore
-                        "\n",
-                    )
-            elif role == "qa":
-                print(
-                    "\n---------------\nSession: ", session_number+1, " | QA",
-                    "\nAPI Response:\n",
-                    json.dumps(json.loads(response.text)["content"], indent=4),  # type: ignore
-                    "\n",
-                )
-            elif role == "worker":
-                print(
-                    "\n---------------\nSession: ", session_number+1, " Step:",
-                    step+1,
-                    "\nAPI Response:\n",
-                    json.dumps(json.loads(response.text)["content"], indent=4),  # type: ignore
-                    "\n",
-                )
-            else:
-                raise ValueError(f"Invalid role: {role}")
-            
+  
     # Check for saved messages
     saved_messages = load_messages()
     if saved_messages:
@@ -157,15 +101,15 @@ async def main():
     # Run the sampling loop
     messages = await sampling_loop(
         model="claude-3-5-sonnet-20241022",
-        provider=provider,
-        system_prompt_suffix="",
+        computer_use_client=computer_use_client,
+        text_query_client=text_query_client,
         messages=messages,
         instruction=instruction,
         rag_url=rag_url,
+        chatbot_link=chatbot_link,
         output_callback=output_callback,
         tool_output_callback=tool_output_callback,
         api_response_callback=api_response_callback,
-        api_key=api_key,
         only_n_most_recent_images=10,
         max_tokens=4096,
     )

@@ -1,6 +1,6 @@
 # Computer Use for tools on MacOS as a team
 
-This is to use Anthropic's Computer Use to perform tasks on MacOS with multiple agents working together. The program runs the native MacOS. It uses Claude 3.5 Sonnet to perform tasks on your Mac by simulating mouse and keyboard actions as well as running bash command. Please use this with caution. 
+This is to use Anthropic's Computer Use model to perform tasks on MacOS with multiple agents working together. The program runs the native MacOS. It uses Claude 3.5 Sonnet to perform tasks on your Mac by simulating mouse and keyboard actions as well as running bash command. Please use this with caution.
 
 This is built on top of the [Claude Computer Use Demo for MacOS](https://github.com/PallavAg/claude-computer-use-macos) which was originally forked from Anthropic's [computer use demo](https://github.com/anthropics/anthropic-quickstarts/tree/main/computer-use-demo) - optimized for MacOS.
 
@@ -38,6 +38,10 @@ View Anthropic's docs [here](https://docs.anthropic.com/en/docs/build-with-claud
 > 8. Click on Customize to customize the allowed websites
 > 9. Click Done
 
+## Use Juji Chatbot to provide context
+
+You can use Juji Chatbot to provide context to the Computer Use model. You can do this by setting the `CHATBOT_LINK` environment variable. You will need to have an account on https://juji.io/ and create and deploy a chatbot.
+
 ## Installation and Setup
 
 1. **Clone the repository:**
@@ -71,7 +75,15 @@ View Anthropic's docs [here](https://docs.anthropic.com/en/docs/build-with-claud
 
    Replace `AGENTOPS_API_KEY` with your actual AgentOps API key. You find yours [here](https://app.agentops.ai/settings/projects).
 
-5. **Grant Accessibility Permissions:**
+5. **[Optional] Set your Chatbot link as an environment variable:**
+
+   ```bash
+   export CHATBOT_LINK="CHATBOT_LINK"
+   ```
+
+   Replace `CHATBOT_LINK` with your actual Chatbot link. You find yours [here](https://app.juji.ai/chatbots).
+
+6. **Grant Accessibility Permissions:**
 
    The script uses `pyautogui` to control mouse and keyboard events. On MacOS, you need to grant accessibility permissions. These popups should show automatically the first time you run the script so you can skip this step. But to manually provide permissions:
 
