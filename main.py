@@ -49,6 +49,15 @@ if not chatbot_link:
         "skipping chatbot init as no link is set."
     )
 
+juji_api_key = os.getenv("JUJI_API_KEY")
+juji_platform_url = os.getenv("JUJI_PLATFORM_URL")
+juji_chatbot_engagement_id = os.getenv("JUJI_CHATBOT_ENGAGEMENT_ID")
+if not juji_api_key or not juji_chatbot_engagement_id:
+    print(
+        "Running without Juji chatbot update as no API key or engagement ID is provided."
+    )
+
+
 def signal_handler(signum, frame):
     """Handle SIGINT by saving messages and exiting"""
     print("\nReceived interrupt signal. Saving progress...")
@@ -112,6 +121,9 @@ async def main():
         api_response_callback=api_response_callback,
         only_n_most_recent_images=10,
         max_tokens=4096,
+        juji_api_key=juji_api_key,
+        juji_chatbot_engagement_id=juji_chatbot_engagement_id,
+        juji_platform_url=juji_platform_url
     )
 
     # Save final messages

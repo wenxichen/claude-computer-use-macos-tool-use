@@ -1,5 +1,5 @@
 anthropic[bedrock,vertex]>=0.37.1
 pillow
 PyAutoGUI
-agentops>=0.3.18
+agentops
 juji-python-sdk

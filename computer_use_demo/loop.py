@@ -30,6 +30,7 @@ from .tools import BashTool, ComputerTool, EditTool, ToolCollection, ToolResult
 from llama_index.core import SummaryIndex
 from llama_index.readers.web import SimpleWebPageReader
     
+from juji_python_sdk import Chatbot, JujiDesign, Participation
 
 ######
 # RAG logging
@@ -63,13 +64,14 @@ logging.getLogger().addHandler(logging.StreamHandler(stream=sys.stdout))
 
 # ================================
 # TODO: Support chatbot query and update.
-# 1. check if chatbot is enabled
-# 2. if chatbot is enabled, query the chatbot for information about the task
-# 3. if chatbot returns information, check if further query is needed
-# 4. if further query is needed, query for further information
-# 5. use the information to generate the plan
-# 6. carry out task following the plan
-# 7. if plan is not successful or need human interaction, update chatbot with new information
+# 1. check if chatbot is enabled x
+# 2. if chatbot is enabled, query the chatbot for information about the task x
+# 3. if chatbot returns information, check if further query is needed x
+# 4. if further query is needed, query for further information x
+# 5. use the information to generate the plan x
+# 6. carry out task following the plan x
+# 7. if plan is not successful or need human interaction x
+# 8. update chatbot with new information from human
 # The idea is the chatbot can be automatically updated from user actions or interaction,
 # use only simple flow and Q&A for now
 # ================================
@@ -106,7 +108,7 @@ MANAGER_SYSTEM_PROMPT = f"""<SYSTEM_CAPABILITY>
 * You are a manager of two agents: one worker agent that utilizes a MacOS computer using {platform.machine()} architecture with internet access, and one quality assurance agent that will review the worker agent's output.
 * You and the agents will have access to the screen of the computer.
 * You can evaluate the goal and the progress from the agents to decide what the agents should do next.
-* When you are not sure what the agent should do next, you can ask the agent to search for relevent information on Google using the firefox browser.
+* When you are not sure what the agent should do next, you can ask the Juji chatbot for relevent information, or when necessary, ask the human for help.
 * The current date is {datetime.today().strftime('%A, %B %-d, %Y')}.
 </SYSTEM_CAPABILITY>
 
@@ -132,6 +134,57 @@ QA_SYSTEM_PROMPT = f"""<SYSTEM_CAPABILITY>
 </IMPORTANT>
 """
 
+DEFAULT_JUJI_PLATFORM_URL = "https://juji.ai"
+
+def _user_message_to_form_faq(description: str):
+    """Form a user message to come up with a new FAQ"""
+    return (f"Given the previous message history, and the description provided below,"
+            f"please come up with a new FAQ that we can add to the chatbot. Please do not use any tools."
+            f"\n\nDescription: {description}"
+            f"\n\nPlease respond in JSON format with the following keys: "
+            f"\n\t- \"question\": string providing the question for the FAQ"
+            f"\n\t- \"answer\": string providing the answer for the FAQ"
+            f"\n\nHere are some examples of JSON output:"
+            f"\n\t{{\"question\": \"What is the capital of France?\","
+            f"\n\t\"answer\": \"The capital of France is Paris.\"}}"
+            f"\n\nPlease make sure only the JSON output is returned, and nothing else."
+            )
+
+def _update_chatbot_with_new_faq(computer_use_client: Anthropic, tool_collection: ToolCollection, juji_design: JujiDesign, juji_chatbot_engagement_id: str, messages: list[str], description: str):
+    """Update the chatbot with new FAQ"""
+
+    # use the messages and the description to create a new FAQ
+    user_message = _user_message_to_form_faq(description)
+    print("User message:", user_message)
+    faq_generation_response = computer_use_client.beta.messages.with_raw_response.create(
+        max_tokens=4096,
+        messages=messages + [{
+            "role": "user", 
+            "content": user_message
+            }],
+        model="claude-3-5-sonnet-20241022",
+        system="You are a helpful assistant that can help with tasks.",
+        tools=tool_collection.to_params(),
+        betas=["computer-use-2024-10-22"]
+    )
+
+    print("FAQ generation response:", faq_generation_response.parse())
+    faq_generation_result = faq_generation_response.parse()
+    
+    faq_json = json.loads(faq_generation_result.content[0].text)
+    print("FAQ JSON:", faq_json)
+    question = faq_json.get('question', "")
+    answer = faq_json.get('answer', "")
+    if question and answer:
+        print("Adding FAQ to Juji:", question, answer)
+        resp = juji_design.add_faq([question], 
+                      [answer], 
+                      juji_chatbot_engagement_id,)
+        print("Juji response:", resp)
+    else:
+        resp = {"success": False, "message": "No question or answer retrieved from the FAQ generation request."}
+    return resp
+
 def _print_chatbot_messages(messages: list[str], role: str):
     for message in messages:
         print(f"{role}:", message)
@@ -140,10 +193,10 @@ def _store_chatbot_messages(all_chatbot_messages: list[str], messages: list[str]
     for message in messages:
         all_chatbot_messages.append((role, message))
 
-def _user_message_to_check_further(instruction: str, all_chatbot_messages: list[str]):
+def _user_message_to_check_further(query: str, all_chatbot_messages: list[str]):
     chatbot_messages = "\n".join([f"{role}: {message}" for role, message in all_chatbot_messages])
-    return (f"Given the INSTRUCTION and response from Juji chatbot below, please advise if further query is needed from the chatbot."
-            f"\n\nINSTRUCTION: {instruction}"
+    return (f"Given the QUERY and response from Juji chatbot below, please advise if further query is needed from the chatbot."
+            f"\n\nQUERY: {query}"
             f"\n\nquery history: \"\"\"\n{chatbot_messages}\n\"\"\""
             f"\n\nPlease respond in JSON format with the following keys: "
             f"\n\t- \"further query needed\": boolean indicating if further query is needed"
@@ -154,26 +207,17 @@ def _user_message_to_check_further(instruction: str, all_chatbot_messages: list[
             f"\n\t{{\"further query needed\": false, \"chatbot does not know\": true, \"query suggestion\": \"\"}}"
             f"\n\t{{\"further query needed\": false, \"chatbot does not know\": false, \"query suggestion\": \"\"}}")
 
-def _query_chatbot(chatbot: Chatbot, instruction: str, text_query_client: OpenAI):
-    """Query the chatbot for information about the task"""
+def _init_chatbot(chatbot: Chatbot):
     all_chatbot_messages = []
-    further_query_count = 0
 
-    print("Querying Juji for info about: ", instruction)
     participation = chatbot.start_chat()
     juji_messages = participation.get_messages()
     _print_chatbot_messages(juji_messages, "Juji")
     _store_chatbot_messages(all_chatbot_messages, juji_messages, "Juji")
+    return all_chatbot_messages, participation
 
-    send_to_juji = "Do you know anything about: " + instruction
-    print("You:", send_to_juji)
-    _store_chatbot_messages(all_chatbot_messages, [send_to_juji], "You")
-    juji_messages = participation.send_chat_msg(send_to_juji)
-    _print_chatbot_messages(juji_messages, "Juji")
-    _store_chatbot_messages(all_chatbot_messages, juji_messages, "Juji")
-
-    # check if further query is needed
-    user_message = _user_message_to_check_further(instruction, all_chatbot_messages)
+def _check_further_query_needed(all_chatbot_messages: list[str], query: str, text_query_client: OpenAI):
+    user_message = _user_message_to_check_further(query, all_chatbot_messages)
     response = text_query_client.chat.completions.create(
         model="gpt-4o-mini",
         response_format={"type": "json_object"},
@@ -181,52 +225,161 @@ def _query_chatbot(chatbot: Chatbot, instruction: str, text_query_client: OpenAI
     )
     print("Text query response:", response)
     response_json = json.loads(response.choices[0].message.content)
+    return response_json
+
+def _query_chatbot(participation: Participation, all_chatbot_messages: list[str], query: str, text_query_client: OpenAI, follow_up_query: bool = False):
+    """Query the chatbot for information about the task"""
+    further_query_count = 0
+    print("Querying Juji for info about: ", query)
+
+    print("You:", query)
+    _store_chatbot_messages(all_chatbot_messages, [query], "You")
+    juji_messages = participation.send_chat_msg(query, response_timeout=20)
+    _print_chatbot_messages(juji_messages, "Juji")
+    _store_chatbot_messages(all_chatbot_messages, juji_messages, "Juji")
+
+    if follow_up_query:
+        response_json = _check_further_query_needed(all_chatbot_messages, query, text_query_client)
+    else:
+        response_json = {"further query needed": False, "chatbot does not know": False, "query suggestion": ""}
 
     while further_query_count < 3 and response_json.get("further query needed", False) and not response_json.get("chatbot does not know", False) and response_json.get("query suggestion", ""):
         print("You:", response_json.get("query suggestion"))
         further_query_count += 1
         _store_chatbot_messages(all_chatbot_messages, [response_json.get("query suggestion")], "You")
-        juji_messages = participation.send_chat_msg(response_json.get("query suggestion"))
+        juji_messages = participation.send_chat_msg(response_json.get("query suggestion"), response_timeout=20)
         _print_chatbot_messages(juji_messages, "Juji")
         _store_chatbot_messages(all_chatbot_messages, juji_messages, "Juji")
-        user_message = _user_message_to_check_further(instruction, all_chatbot_messages)
-        response = text_query_client.chat.completions.create(
-            model="gpt-4o-mini",
-            response_format={"type": "json_object"},
-            messages=[{"role": "user", "content": user_message}],
-        )
-        print("Text query response:", response)
-        response_json = json.loads(response.choices[0].message.content)
+        response_json = _check_further_query_needed(all_chatbot_messages, query, text_query_client)
     
-    print("End of intial chatbot query")
+    print("End chatbot query")
 
-    return all_chatbot_messages
+    return all_chatbot_messages, participation
+
+def _check_query_to_chatbot_needed(computer_use_client: Anthropic, tool_collection: ToolCollection, model: str, messages: list[BetaMessageParam], manager_system: str, api_response_callback: Callable[[APIResponse[BetaMessage]], None], session_number: int):
+    """Check if further query to the chatbot is needed"""
+
+    user_message = {
+        "role": "user",
+        "content": (
+            f"Given the INSTRUCTION, previous steps, and the previous plan, "
+            f"Juji chatbot's response, please advise if further query to the chatbot is needed, "
+            f"and if so, provide a suggestion for a query to Juji."
+            f"Please respond in JSON format with the following keys: "
+            f"\n\t- \"further query needed\": boolean indicating if further query is needed"
+            f"\n\t- \"query suggestion\": string providing a suggestion for a query to Juji"
+            f"Here are some examples of JSON output:"
+            f"\n\t{{\"further query needed\": true, \"query suggestion\": \"What is the capital of France?\"}}"
+            f"\n\t{{\"further query needed\": false, \"query suggestion\": \"\"}}"
+            f"\n\nPlease make sure only the JSON output is returned, and nothing else."
+        )
+    }
+
+    raw_response = computer_use_client.beta.messages.with_raw_response.create(
+        max_tokens=1024,
+        system=manager_system,
+        messages=messages + [user_message],
+        tools=tool_collection.to_params(),
+        model=model,
+        betas=["computer-use-2024-10-22"]
+    )
+
+    api_response_callback(cast(APIResponse[BetaMessage], raw_response), role="manager", session_number=session_number) 
+
+    response = raw_response.parse()
+    response_json = json.loads(response.content[0].text)
+    further_query_needed = response_json.get('further query needed', False)
+    query_suggestion = response_json.get('query suggestion', "")
+    if further_query_needed:
+        print("Further query needed:", query_suggestion)
+    return query_suggestion
+
+def _check_if_human_intervention_needed(computer_use_client: Anthropic, tool_collection: ToolCollection, model: str, messages: list[BetaMessageParam], manager_system: str, api_response_callback: Callable[[APIResponse[BetaMessage]], None], session_number: int):
+    """Check if human intervention is needed"""
+
+    user_message = {
+        "role": "user",
+        "content": (
+            f"Given the INSTRUCTION, previous steps, and the previous plan, "
+            f"Juji chatbot's response, please advise if human intervention is needed or"
+            f" if there is enough information to complete the task, "
+            f"and if so, provide a suggestion for a query to Juji."
+            f"Please respond in JSON format with the following keys: "
+            f"\n\t- \"human intervention needed\": boolean indicating if human intervention is needed"
+            f"\n\t- \"query to human\": string providing a query to human"
+            f"Here are some examples of JSON output:"
+            f"\n\t{{\"human intervention needed\": true, \"query to human\": \"How do I change the avatar of the chatbot?\"}}"
+            f"\n\t{{\"human intervention needed\": false, \"query to human\": \"\"}}"
+            f"\n\nPlease make sure only the JSON output is returned, and nothing else."
+        )
+    }
+
+    raw_response = computer_use_client.beta.messages.with_raw_response.create(
+        max_tokens=1024,
+        system=manager_system,
+        messages=messages + [user_message],
+        tools=tool_collection.to_params(),
+        model=model,
+        betas=["computer-use-2024-10-22"]
+    )
+
+    api_response_callback(cast(APIResponse[BetaMessage], raw_response), role="manager", session_number=session_number) 
+
+    response = raw_response.parse()
+    response_json = json.loads(response.content[0].text)
+    human_intervention_needed = response_json.get('human intervention needed', False)
+    query_to_human = response_json.get('query to human', "")
+    if human_intervention_needed:
+        print("Human intervention needed:", query_to_human)
+    return query_to_human
 
 
 
 def _manager_check_progress(
         messages: list[BetaMessageParam], 
         computer_use_client: Anthropic, 
+        text_query_client: OpenAI,
         model: str, 
         manager_system: str, 
         api_response_callback: Callable[[APIResponse[BetaMessage]], None],
         tool_collection: ToolCollection,
         session_number: int,
-        all_chatbot_messages: list[str]
+        all_chatbot_messages: list[str],
+        chatbot_participation: Participation
 ):
     
-
-
     if session_number > 0:
-        user_message = {
-            "role": "user",
-            "content": 
-                f"Given the INSTRUCTION, previous steps, and the previous plan, "
-                "please adjust the plan for the agent to continue completing the task. Please do not use any tools. "
-                "If the worker agent is stuck, you can ask the worker agent to search for relevent information on Google.",
-        }
-    else:
+        # check if further query to Juji chatbot is needed
+        query_suggestion = _check_query_to_chatbot_needed(computer_use_client, tool_collection, model, messages, manager_system, api_response_callback, session_number)
+        if query_suggestion:
+            all_chatbot_messages, chatbot_participation = _query_chatbot(chatbot_participation, all_chatbot_messages, query_suggestion, text_query_client)
 
+            # check if the chatbot does not know the answer and if human intervention is needed
+            query_to_human = _check_if_human_intervention_needed(computer_use_client, tool_collection, model, messages, manager_system, api_response_callback, session_number)
+            if query_to_human:
+                human_input = input("Human intervention needed. Please help with the following query: \"" + query_to_human + "\". Press Enter to continue...")
+                user_message = {
+                "role": "user",
+                "content": 
+                    (f"Given the INSTRUCTION and context, previous steps, the previous plan, "
+                     f"the following interaction history between you and Juji, and the human advise, "
+                     f"\n\ninteraction history between you and Juji: \"\"\"\n{all_chatbot_messages}\n\"\"\""
+                     f"\n\nhuman advise: \"\"\"\n{human_input}\n\"\"\""
+                     f"please adjust the plan for the agent to continue completing the task. Please do not use any tools."
+                    )
+                }
+            else:
+                user_message = {
+                    "role": "user",
+                    "content": 
+                        f"Given the INSTRUCTION and context, previous steps, the previous plan, and "
+                        f"the following interaction history between you and Juji, "
+                        f"\n\ninteraction history between you and Juji: \"\"\"\n{all_chatbot_messages}\n\"\"\""
+                        f"please adjust the plan for the agent to continue completing the task. Please do not use any tools."
+                }
+        else:
+            return None
+    else:
         # if Juji returns info, use it to generate the plan
         if all_chatbot_messages:
             initial_chatbot_query_messages = "\n".join([f"{role}: {message}" for role, message in all_chatbot_messages])
@@ -304,6 +457,9 @@ async def sampling_loop(
     max_tokens: int = 4096,
     rag_url: str | None = None,
     chatbot_link: str | None = None,
+    juji_api_key: str | None = None,
+    juji_chatbot_engagement_id: str | None = None,
+    juji_platform_url: str | None = None,
 ):
     """
     Agentic sampling loop for the assistant/tool interaction of computer use.
@@ -313,6 +469,12 @@ async def sampling_loop(
         BashTool(),
         EditTool(),
     )
+
+    if juji_api_key and juji_chatbot_engagement_id:
+        juji_platform_url = juji_platform_url or DEFAULT_JUJI_PLATFORM_URL
+        juji_design = JujiDesign(juji_api_key, juji_platform_url)
+        # _update_chatbot_with_new_faq(computer_use_client, tool_collection, juji_design, juji_chatbot_engagement_id, [], 
+        #                              "The user was asked to help the worker agent to change the avatar of a chatbot, because the agent did not know where to do it. The user responded by \"Simply go to the Chatbot Settings page and there you can see the avatar of the chatbot, and you should be able to change it there.\"")
 
     system = (
         f"{WORKER_SYSTEM_PROMPT}\n\n<INSTRUCTION>\n{instruction}\n</INSTRUCTION>"
@@ -344,15 +506,16 @@ async def sampling_loop(
 
     all_chatbot_messages = []
     if chatbot_link:
-        from juji_python_sdk import Chatbot
         chatbot = Chatbot(chatbot_link)
-        all_chatbot_messages = _query_chatbot(chatbot, instruction, text_query_client)
+        all_chatbot_messages, chatbot_participation = _init_chatbot(chatbot)
+        query2chatbot = "Do you know anything about: " + instruction
+        all_chatbot_messages, chatbot_participation = _query_chatbot(chatbot_participation, all_chatbot_messages, query2chatbot, text_query_client)
 
     total_sessions = 0
 
     while total_sessions < 10:
 
-        manager_plan = _manager_check_progress(messages, computer_use_client, model, manager_system, api_response_callback, tool_collection, session_number=total_sessions, all_chatbot_messages=all_chatbot_messages)
+        manager_plan = _manager_check_progress(messages, computer_use_client, text_query_client, model, manager_system, api_response_callback, tool_collection, session_number=total_sessions, all_chatbot_messages=all_chatbot_messages, chatbot_participation=chatbot_participation)
 
         if total_sessions == 0:
             messages.append(
@@ -364,17 +527,19 @@ async def sampling_loop(
             )
 
         else:
-            messages.append(
-                {
-                    "role": "user",
-                    "content": f"Given the INSTRUCTION and what you have done so far, here is an updated plan provided by the manager:\n{manager_plan}"
-                    "\n\nPlease follow the plan to complete the task.",
-                }
-            )
+            # Manager plan does not always exist
+            if manager_plan:
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": f"Given the INSTRUCTION and what you have done so far, here is an updated plan provided by the manager:\n{manager_plan}"
+                        "\n\nPlease follow the plan to complete the task.",
+                    }
+                )
 
         count = 0
 
-        while count < 5:
+        while count < 8:
             if only_n_most_recent_images:
                 _maybe_filter_to_n_most_recent_images(messages, only_n_most_recent_images)
 

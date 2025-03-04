@@ -4,7 +4,7 @@ from .collection import ToolCollection
 from .computer import ComputerTool
 from .edit import EditTool
 
-__ALL__ = [
+__all__ = [
     BashTool,
     CLIResult,
     ComputerTool,
