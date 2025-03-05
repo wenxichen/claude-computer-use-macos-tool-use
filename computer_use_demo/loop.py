@@ -63,15 +63,10 @@ logging.getLogger().addHandler(logging.StreamHandler(stream=sys.stdout))
 #     client = AnthropicBedrock()
 
 # ================================
-# TODO: Support chatbot query and update.
-# 1. check if chatbot is enabled x
-# 2. if chatbot is enabled, query the chatbot for information about the task x
-# 3. if chatbot returns information, check if further query is needed x
-# 4. if further query is needed, query for further information x
-# 5. use the information to generate the plan x
-# 6. carry out task following the plan x
-# 7. if plan is not successful or need human interaction x
-# 8. update chatbot with new information from human
+# TODO: Support human intervention and update.
+# 1. trigger human intervention when process being interrupted
+# 2. allow worker agent to escalate when getting stuck
+# 3. update Juji chatbot with new information from human
 # The idea is the chatbot can be automatically updated from user actions or interaction,
 # use only simple flow and Q&A for now
 # ================================
@@ -330,8 +325,7 @@ def _check_if_human_intervention_needed(computer_use_client: Anthropic, tool_col
     human_intervention_needed = response_json.get('human intervention needed', False)
     query_to_human = response_json.get('query to human', "")
     if human_intervention_needed:
-        print("Human intervention needed:", query_to_human)
-    return query_to_human
+        return query_to_human
 
 
 
