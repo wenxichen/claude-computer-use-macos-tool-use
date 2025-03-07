@@ -133,8 +133,8 @@ DEFAULT_JUJI_PLATFORM_URL = "https://juji.ai"
 
 def _user_message_to_form_faq(description: str):
     """Form a user message to come up with a new FAQ"""
-    return (f"Given the previous message history, and the description provided below,"
-            f"please come up with a new FAQ that we can add to the chatbot. Please do not use any tools."
+    return (f"Given the previous message history, steps the agent took, and the description provided below,"
+            f"please come up with one most relevant FAQ that we can add to the chatbot so the agent can use it to complete similar tasks next time. Please do not use any tools."
             f"\n\nDescription: {description}"
             f"\n\nPlease respond in JSON format with the following keys: "
             f"\n\t- \"question\": string providing the question for the FAQ"
@@ -339,66 +339,70 @@ def _manager_check_progress(
         tool_collection: ToolCollection,
         session_number: int,
         all_chatbot_messages: list[str],
-        chatbot_participation: Participation
+        chatbot_participation: Participation,
+        human_intervened_with_additional_instructions: bool
 ):
-    
-    if session_number > 0:
-        # check if further query to Juji chatbot is needed
-        query_suggestion = _check_query_to_chatbot_needed(computer_use_client, tool_collection, model, messages, manager_system, api_response_callback, session_number)
-        if query_suggestion:
-            all_chatbot_messages, chatbot_participation = _query_chatbot(chatbot_participation, all_chatbot_messages, query_suggestion, text_query_client)
+    if human_intervened_with_additional_instructions:
+        pass
+    else:
+        if session_number > 0:
+            # check if further query to Juji chatbot is needed
+            query_suggestion = _check_query_to_chatbot_needed(computer_use_client, tool_collection, model, messages, manager_system, api_response_callback, session_number)
+            if query_suggestion:
+                all_chatbot_messages, chatbot_participation = _query_chatbot(chatbot_participation, all_chatbot_messages, query_suggestion, text_query_client)
 
-            # check if the chatbot does not know the answer and if human intervention is needed
-            query_to_human = _check_if_human_intervention_needed(computer_use_client, tool_collection, model, messages, manager_system, api_response_callback, session_number)
-            if query_to_human:
-                human_input = input("Human intervention needed. Please help with the following query: \"" + query_to_human + "\". Press Enter to continue...")
+                # check if the chatbot does not know the answer and if human intervention is needed
+                query_to_human = _check_if_human_intervention_needed(computer_use_client, tool_collection, model, messages, manager_system, api_response_callback, session_number)
+                if query_to_human:
+                    human_input = input("Human intervention needed. Please help with the following query: \"" + query_to_human + "\". Press Enter to continue...")
+                    user_message = {
+                    "role": "user",
+                    "content": 
+                        (f"Given the INSTRUCTION and context, previous steps, the previous plan, "
+                        f"the following interaction history between you and Juji, and the human advise, "
+                        f"\n\ninteraction history between you and Juji: \"\"\"\n{all_chatbot_messages}\n\"\"\""
+                        f"\n\nhuman advise: \"\"\"\n{human_input}\n\"\"\""
+                        f"please adjust the plan for the agent to continue completing the task. Please do not use any tools."
+                        )
+                    }
+                else:
+                    user_message = {
+                        "role": "user",
+                        "content": 
+                            f"Given the INSTRUCTION and context, previous steps, the previous plan, and "
+                            f"the following interaction history between you and Juji, "
+                            f"\n\ninteraction history between you and Juji: \"\"\"\n{all_chatbot_messages}\n\"\"\""
+                            f"please adjust the plan for the agent to continue completing the task. Please do not use any tools."
+                    }
+            else:
+                return None
+        else:
+            # if Juji returns info, use it to generate the plan
+            if all_chatbot_messages:
+                initial_chatbot_query_messages = "\n".join([f"{role}: {message}" for role, message in all_chatbot_messages])
                 user_message = {
-                "role": "user",
-                "content": 
-                    (f"Given the INSTRUCTION and context, previous steps, the previous plan, "
-                     f"the following interaction history between you and Juji, and the human advise, "
-                     f"\n\ninteraction history between you and Juji: \"\"\"\n{all_chatbot_messages}\n\"\"\""
-                     f"\n\nhuman advise: \"\"\"\n{human_input}\n\"\"\""
-                     f"please adjust the plan for the agent to continue completing the task. Please do not use any tools."
-                    )
+                    "role": "user",
+                    "content": 
+                        (f"Given the INSTRUCTION and context, as well as the following interaction history between you and Juji, "
+                        f"\n\ninteraction history: \"\"\"\n{initial_chatbot_query_messages}\n\"\"\""
+                        f"please provide a plan for the agent to complete the task. Please do not use any tools."
+                        )
                 }
             else:
                 user_message = {
                     "role": "user",
                     "content": 
-                        f"Given the INSTRUCTION and context, previous steps, the previous plan, and "
-                        f"the following interaction history between you and Juji, "
-                        f"\n\ninteraction history between you and Juji: \"\"\"\n{all_chatbot_messages}\n\"\"\""
-                        f"please adjust the plan for the agent to continue completing the task. Please do not use any tools."
+                        f"Given the INSTRUCTION and context, "
+                        "please provide a plan for the agent to complete the task. Please do not use any tools.",
                 }
-        else:
-            return None
-    else:
-        # if Juji returns info, use it to generate the plan
-        if all_chatbot_messages:
-            initial_chatbot_query_messages = "\n".join([f"{role}: {message}" for role, message in all_chatbot_messages])
-            user_message = {
-                "role": "user",
-                "content": 
-                    (f"Given the INSTRUCTION and context, as well as the following interaction history between you and Juji, "
-                    f"\n\ninteraction history: \"\"\"\n{initial_chatbot_query_messages}\n\"\"\""
-                    f"please provide a plan for the agent to complete the task. Please do not use any tools."
-                    )
-            }
-        else:
-            user_message = {
-                "role": "user",
-                "content": 
-                    f"Given the INSTRUCTION and context, "
-                    "please provide a plan for the agent to complete the task. Please do not use any tools.",
-            }
     
-    # Call the API to get some planning and context
-    print("User message:", user_message)
+        # Call the API to get some planning and context
+        print("User message:", user_message)
+        messages.append(user_message)
     raw_response = computer_use_client.beta.messages.with_raw_response.create(
         max_tokens=1024,
         system=manager_system,
-        messages=messages + [user_message],
+        messages=messages,
         tools=tool_collection.to_params(),
         model=model,
         betas=["computer-use-2024-10-22"]
@@ -507,102 +511,118 @@ async def sampling_loop(
 
     total_sessions = 0
 
-    while total_sessions < 10:
+    running = True
+    human_intervened_with_additional_instructions = False
+    while total_sessions < 10 and running:
 
-        manager_plan = _manager_check_progress(messages, computer_use_client, text_query_client, model, manager_system, api_response_callback, tool_collection, session_number=total_sessions, all_chatbot_messages=all_chatbot_messages, chatbot_participation=chatbot_participation)
+        try:
 
-        if total_sessions == 0:
-            messages.append(
-                {
-                    "role": "user",
-                    "content": f"Given the INSTRUCTION, here is a plan provided by the manager:\n{manager_plan}"
-                    "\n\nPlease follow the plan to complete the task.",
-                }
-            )
+            manager_plan = _manager_check_progress(messages, computer_use_client, text_query_client, model, manager_system, api_response_callback, tool_collection, session_number=total_sessions, all_chatbot_messages=all_chatbot_messages, chatbot_participation=chatbot_participation, human_intervened_with_additional_instructions=human_intervened_with_additional_instructions)
 
-        else:
-            # Manager plan does not always exist
-            if manager_plan:
+            human_intervened_with_additional_instructions = False
+
+            if total_sessions == 0:
                 messages.append(
                     {
                         "role": "user",
-                        "content": f"Given the INSTRUCTION and what you have done so far, here is an updated plan provided by the manager:\n{manager_plan}"
+                        "content": f"Given the INSTRUCTION, here is a plan provided by the manager:\n{manager_plan}"
                         "\n\nPlease follow the plan to complete the task.",
                     }
                 )
 
-        count = 0
-
-        while count < 8:
-            if only_n_most_recent_images:
-                _maybe_filter_to_n_most_recent_images(messages, only_n_most_recent_images)
-
-            # Call the API
-            # we use raw_response to provide debug information to streamlit. Your
-            # implementation may be able call the SDK directly with:
-            # `response = client.messages.create(...)` instead.
-            raw_response = computer_use_client.beta.messages.with_raw_response.create(
-                max_tokens=max_tokens,
-                messages=messages,
-                model=model,
-                system=system,
-                tools=tool_collection.to_params(),
-                betas=["computer-use-2024-10-22"],
-            )
-
-            api_response_callback(cast(APIResponse[BetaMessage], raw_response), count, session_number=total_sessions)
-
-            response = raw_response.parse()
-
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": cast(list[BetaContentBlockParam], response.content),
-                }
-            )
-
-            tool_result_content: list[BetaToolResultBlockParam] = []
-            for content_block in cast(list[BetaContentBlock], response.content):
-                output_callback(content_block)
-                if content_block.type == "tool_use":
-                    result = await tool_collection.run(
-                        name=content_block.name,
-                        tool_input=cast(dict[str, Any], content_block.input),
+            else:
+                # Manager plan does not always exist
+                if manager_plan:
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": f"Given the INSTRUCTION and what you have done so far, here is an updated plan provided by the manager:\n{manager_plan}"
+                            "\n\nPlease follow the plan to complete the task.",
+                        }
                     )
-                    tool_result_content.append(
-                        _make_api_tool_result(result, content_block.id)
-                    )
-                    tool_output_callback(result, content_block.id)
 
-            if not tool_result_content:
-                # Check with QA agent if goal is met
-                qa_response = computer_use_client.beta.messages.with_raw_response.create(
+            count = 0
+
+            while count < 8:
+                if only_n_most_recent_images:
+                    _maybe_filter_to_n_most_recent_images(messages, only_n_most_recent_images)
+
+                # Call the API
+                # we use raw_response to provide debug information to streamlit. Your
+                # implementation may be able call the SDK directly with:
+                # `response = client.messages.create(...)` instead.
+                raw_response = await computer_use_client.beta.messages.with_raw_response.create(
                     max_tokens=max_tokens,
-                    messages=messages + [{
-                        "role": "user", 
-                        "content": f"Has the instruction goal been achieved? Please answer in JSON format."
-                    }],
+                    messages=messages,
                     model=model,
-                    system=qa_system,
+                    system=system,
                     tools=tool_collection.to_params(),
-                    betas=["computer-use-2024-10-22"]
+                    betas=["computer-use-2024-10-22"],
                 )
-            
-                api_response_callback(cast(APIResponse[BetaMessage], qa_response), count, role="qa", session_number=total_sessions)
-                qa_result = qa_response.parse()
+
+                api_response_callback(cast(APIResponse[BetaMessage], raw_response), count, session_number=total_sessions)
+
+                response = raw_response.parse()
+
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": cast(list[BetaContentBlockParam], response.content),
+                    }
+                )
+
+                tool_result_content: list[BetaToolResultBlockParam] = []
+                for content_block in cast(list[BetaContentBlock], response.content):
+                    output_callback(content_block)
+                    if content_block.type == "tool_use":
+                        result = await tool_collection.run(
+                            name=content_block.name,
+                            tool_input=cast(dict[str, Any], content_block.input),
+                        )
+                        tool_result_content.append(
+                            _make_api_tool_result(result, content_block.id)
+                        )
+                        tool_output_callback(result, content_block.id)
+
+                if not tool_result_content:
+                    # Check with QA agent if goal is met
+                    qa_response = await computer_use_client.beta.messages.with_raw_response.create(
+                        max_tokens=max_tokens,
+                        messages=messages + [{
+                            "role": "user", 
+                            "content": f"Has the instruction goal been achieved? Please answer in JSON format."
+                        }],
+                        model=model,
+                        system=qa_system,
+                        tools=tool_collection.to_params(),
+                        betas=["computer-use-2024-10-22"]
+                    )
                 
-                qa_json = json.loads(qa_result.content[0].text)
-                if qa_json.get('is_complete', False):
-                    api_response_callback(None, is_done=True)
-                    messages.append({"content": qa_result.content[0].text, "role": "assistant"})  
-                    _manager_report_progress(messages, computer_use_client, model, manager_system, api_response_callback, tool_collection)
-                    return messages
-            messages.append({"content": tool_result_content, "role": "user"})
-        
-            count += 1
+                    api_response_callback(cast(APIResponse[BetaMessage], qa_response), count, role="qa", session_number=total_sessions)
+                    qa_result = qa_response.parse()
+                    
+                    qa_json = json.loads(qa_result.content[0].text)
+                    if qa_json.get('is_complete', False):
+                        api_response_callback(None, is_done=True)
+                        messages.append({"content": qa_result.content[0].text, "role": "assistant"})  
+                        _manager_report_progress(messages, computer_use_client, model, manager_system, api_response_callback, tool_collection)
+                        return messages
+                messages.append({"content": tool_result_content, "role": "user"})
+            
+                count += 1
 
-        total_sessions += 1
+            total_sessions += 1
 
+        except KeyboardInterrupt:
+            user_input = input("- If you want to stop the program, press Ctrl+C again.\n- If you want to continue, press Enter.\n- If you want to intervene with additional instructions, press 'i'.")
+            if user_input == "i":
+                instruction = input("Please provide the additional instructions:")
+                if juji_design:
+                    to_update_chatbot = input("Do you want to update the chatbot with your instructions? (y/n)")
+                    if to_update_chatbot == "y":
+                        _update_chatbot_with_new_faq(computer_use_client, tool_collection, juji_design, juji_chatbot_engagement_id, [], f"The user intervened the agent with the following instructions: {instruction}.")
+                messages.append({"content": f"The human user intervened the agent with the following additional instructions: {instruction}\n\nplease adjust the plan for the agent to continue completing the task. Please do not use any tools.", "role": "user"})
+                human_intervened_with_additional_instructions = True
     _manager_report_progress(messages, computer_use_client, model, manager_system, api_response_callback, tool_collection)
 
 

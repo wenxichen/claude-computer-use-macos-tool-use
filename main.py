@@ -58,15 +58,15 @@ if not juji_api_key or not juji_chatbot_engagement_id:
     )
 
 
-def signal_handler(signum, frame):
-    """Handle SIGINT by saving messages and exiting"""
-    print("\nReceived interrupt signal. Saving progress...")
-    if hasattr(signal_handler, 'messages'):
-        save_messages(signal_handler.messages)
-    sys.exit(0)
+# def signal_handler(signum, frame):
+#     """Handle SIGINT by saving messages and exiting"""
+#     print("\nReceived interrupt signal. Saving progress...")
+#     if hasattr(signal_handler, 'messages'):
+#         save_messages(signal_handler.messages)
+#     sys.exit(0)
 
-# Set up signal handler
-signal.signal(signal.SIGINT, signal_handler)
+# # Set up signal handler
+# signal.signal(signal.SIGINT, signal_handler)
 
 # Check if the instruction is provided via command line arguments
 if len(sys.argv) > 1:
@@ -105,7 +105,7 @@ async def main():
             remove_checkpoints()
 
     # Store messages in signal handler for access during interrupt
-    signal_handler.messages = messages
+    # signal_handler.messages = messages
 
     # Run the sampling loop
     messages = await sampling_loop(
