@@ -1,19 +1,12 @@
-# Computer Use for tools on MacOS as a team
+# Computer Use for tools on MacOS with AI agent as interactive knowledge base
 
-This is to use Anthropic's Computer Use model to perform tasks on MacOS with multiple agents working together. The program runs the native MacOS. It uses Claude 3.5 Sonnet to perform tasks on your Mac by simulating mouse and keyboard actions as well as running bash command. Please use this with caution.
+This is a proof of concept for using AI agent as an evolving knowledge base for other AI agents.
 
-This is built on top of the [Claude Computer Use Demo for MacOS](https://github.com/PallavAg/claude-computer-use-macos) which was originally forked from Anthropic's [computer use demo](https://github.com/anthropics/anthropic-quickstarts/tree/main/computer-use-demo) - optimized for MacOS.
-
-The multi-agent pipeline is described here: https://docs.google.com/presentation/d/1Ua2YGQyAPQ-lg7lIAFq_q6zhwuLkC0wy3wPt6LmXAu0/edit?usp=sharing
-
-Some examples are shown in the notion notes here: https://resilient-rabbit-7f2.notion.site/Mac-Computer-Use-Tool-Use-Examples-13ae229b4ca080afb12bfed6600bf724
-
-View Anthropic's docs [here](https://docs.anthropic.com/en/docs/build-with-claude/computer-use).
+This uses Anthropic's Computer Use model to perform tasks on MacOS with multiple agents working together. Juji's AI agents are used as the knowledge base. The program runs the native MacOS. It uses Claude 3.5 Sonnet to perform tasks on your Mac by simulating mouse and keyboard actions. Please use this with caution.
 
 > [!CAUTION]
 > - **Security Risks:** This script allows claude to control your computer's mouse and keyboard and run bash commands. Use it at your own risk.
 > - **Responsibility:** By running this script, you assume all responsibility and liability for any results.
-> - **AgentOps:** This script uses AgentOps to track the usage of the tool. If you do not want to track the usage, please do not set the `AGENTOPS_API_KEY` environment variable.
 >
 > Computer use is a beta feature. Please be aware that computer use poses unique risks that are distinct from standard API features or chat interfaces. These risks are heightened when using computer use to interact with the internet. To minimize risks, consider taking precautions such as:
 >
@@ -68,8 +61,9 @@ You can use Juji Chatbot to provide context to the Computer Use model. You can d
    Replace `CLAUDE_API_KEY` with your actual Anthropic API key. You find yours [here](https://console.anthropic.com/settings/keys).
 
 4. **[Optional] Set your AgentOps API key as an environment variable:**
-
- ```bash
+   
+   DISABLED FOR NOW DUE TO MAKE KeyboardInterrupt WORK.
+   ```bash
    export AGENTOPS_API_KEY="AGENTOPS_API_KEY"
    ```
 
@@ -107,4 +101,12 @@ Replace `'Open Safari and look up Anthropic'` with your desired instruction.
 
 You can quit the script at any time by pressing `Ctrl+C` in the terminal.
 
-## ⚠ Disclaimer
+## References
+
+This is built on top of the [Claude Computer Use Demo for MacOS](https://github.com/PallavAg/claude-computer-use-macos) which was originally forked from Anthropic's [computer use demo](https://github.com/anthropics/anthropic-quickstarts/tree/main/computer-use-demo) - optimized for MacOS.
+
+The multi-agent pipeline is described here: https://docs.google.com/presentation/d/1Ua2YGQyAPQ-lg7lIAFq_q6zhwuLkC0wy3wPt6LmXAu0/edit?usp=sharing
+
+Some examples are shown in the notion notes here: https://resilient-rabbit-7f2.notion.site/Mac-Computer-Use-Tool-Use-Examples-13ae229b4ca080afb12bfed6600bf724
+
+View Anthropic's docs [here](https://docs.anthropic.com/en/docs/build-with-claude/computer-use).

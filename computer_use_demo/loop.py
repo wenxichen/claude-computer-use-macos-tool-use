@@ -2,6 +2,7 @@
 Agentic sampling loop that calls the Anthropic API and local implenmentation of anthropic-defined computer use tools.
 """
 
+# import asyncio
 import json
 import platform
 from collections.abc import Callable
@@ -551,7 +552,15 @@ async def sampling_loop(
                 # we use raw_response to provide debug information to streamlit. Your
                 # implementation may be able call the SDK directly with:
                 # `response = client.messages.create(...)` instead.
-                raw_response = await computer_use_client.beta.messages.with_raw_response.create(
+                # response = await computer_use_client.messages.create(
+                #     max_tokens=max_tokens,
+                #     messages=messages,
+                #     model=model,
+                #     system=system,
+                #     tools=tool_collection.to_params(),
+                #     betas=["computer-use-2024-10-22"],
+                # )
+                raw_response = computer_use_client.beta.messages.with_raw_response.create(
                     max_tokens=max_tokens,
                     messages=messages,
                     model=model,
@@ -586,7 +595,7 @@ async def sampling_loop(
 
                 if not tool_result_content:
                     # Check with QA agent if goal is met
-                    qa_response = await computer_use_client.beta.messages.with_raw_response.create(
+                    qa_response = computer_use_client.beta.messages.with_raw_response.create(
                         max_tokens=max_tokens,
                         messages=messages + [{
                             "role": "user", 

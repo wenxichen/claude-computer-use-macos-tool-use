@@ -31,17 +31,17 @@ if openai_api_key == "YOUR_API_KEY_HERE":
     )
 text_query_client = OpenAI(api_key=openai_api_key)
 
-# Set up your AgentOps API key
-agentops_api_key = os.getenv("AGENTOPS_API_KEY", "YOUR_API_KEY_HERE")
-if agentops_api_key == "YOUR_API_KEY_HERE":
-    print(
-        "skipping agentops init as no key is set."
-    )
-    USE_AGENTOPS = False
-else:
-    import agentops
-    agentops.init(api_key=agentops_api_key)
-    USE_AGENTOPS = True
+# # Set up your AgentOps API key
+# agentops_api_key = os.getenv("AGENTOPS_API_KEY", "YOUR_API_KEY_HERE")
+# if agentops_api_key == "YOUR_API_KEY_HERE":
+#     print(
+#         "skipping agentops init as no key is set."
+#     )
+#     USE_AGENTOPS = False
+# else:
+#     import agentops
+#     agentops.init(api_key=agentops_api_key)
+#     USE_AGENTOPS = True
 
 chatbot_link = os.getenv("CHATBOT_LINK")
 if not chatbot_link:
@@ -133,8 +133,18 @@ async def main():
 if __name__ == "__main__":
     try:
         asyncio.run(main())
+    except KeyboardInterrupt:
+            user_input = input("At MAIN:\n- If you want to stop the program, press Ctrl+C again.\n- If you want to continue, press Enter.\n- If you want to intervene with additional instructions, press 'i'.")
+            if user_input == "i":
+                instruction = input("Please provide the additional instructions:")
+                # if juji_design:
+                #     to_update_chatbot = input("Do you want to update the chatbot with your instructions? (y/n)")
+                #     if to_update_chatbot == "y":
+                #         _update_chatbot_with_new_faq(computer_use_client, tool_collection, juji_design, juji_chatbot_engagement_id, [], f"The user intervened the agent with the following instructions: {instruction}.")
+                # messages.append({"content": f"The human user intervened the agent with the following additional instructions: {instruction}\n\nplease adjust the plan for the agent to continue completing the task. Please do not use any tools.", "role": "user"})
+                human_intervened_with_additional_instructions = True
     except Exception as e:
         print(f"Encountered Error:\n{e}")
 
-    if USE_AGENTOPS:    
-        agentops.end_session('Success')
+    # if USE_AGENTOPS:    
+    #     agentops.end_session('Success')
