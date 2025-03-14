@@ -6,12 +6,14 @@ import signal
 
 from anthropic import Anthropic
 from openai import OpenAI
-from computer_use_demo.loop import sampling_loop
+from computer_use_demo.loop import sampling_loop, _init_chatbot
 from anthropic.types.beta import BetaMessageParam
 
 from computer_use_demo.utils import save_messages, load_messages, remove_checkpoints, output_callback, tool_output_callback, api_response_callback
 
 dotenv.load_dotenv()
+
+from juji_python_sdk import Chatbot, Participation
 
 # ================================
 # Basic setup
@@ -82,29 +84,25 @@ else:
 # ================================
 
 
-async def main():
+async def main(messages: list[BetaMessageParam] = None, human_intervention: bool = False, all_chatbot_messages: list[BetaMessageParam] = None, chatbot_participation: Participation = None):
 
     print(
         f"Starting Claude 'Computer Use'.\nPress ctrl+c to stop.\nInstructions provided: '{instruction}'"
     )
 
-    # Set up the initial messages
-    messages: list[BetaMessageParam] = [
-  
-    ]
-  
-    # Check for saved messages
-    saved_messages = load_messages()
-    if saved_messages:
-        print("Found saved progress. Would you like to continue? (y/n)")
-        if input().lower() == 'y':
-            messages = saved_messages
-            print("Continuing from saved progress...")
-        else:
-            print("Starting fresh...")
-            remove_checkpoints()
+    if not messages:
+        # Check for saved messages
+        saved_messages = load_messages()
+        if saved_messages:
+            print("Found saved progress. Would you like to continue? (y/n)")
+            if input().lower() == 'y':
+                messages = saved_messages
+                print("Continuing from saved progress...")
+            else:
+                print("Starting fresh...")
+                remove_checkpoints()
 
-    # Store messages in signal handler for access during interrupt
+    # # Store messages in signal handler for access during interrupt
     # signal_handler.messages = messages
 
     # Run the sampling loop
@@ -123,7 +121,10 @@ async def main():
         max_tokens=4096,
         juji_api_key=juji_api_key,
         juji_chatbot_engagement_id=juji_chatbot_engagement_id,
-        juji_platform_url=juji_platform_url
+        juji_platform_url=juji_platform_url,
+        human_intervention=human_intervention,
+        all_chatbot_messages=all_chatbot_messages,
+        chatbot_participation=chatbot_participation
     )
 
     # Save final messages
@@ -131,20 +132,33 @@ async def main():
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
+    if chatbot_link:
+        chatbot = Chatbot(chatbot_link)
+        all_chatbot_messages, chatbot_participation = _init_chatbot(chatbot)
+    else:
+        all_chatbot_messages = None
+        chatbot_participation = None
+    messages = []
+    human_intervention = False
+    while True:
+        try:
+            asyncio.run(main(messages=messages, human_intervention=human_intervention, all_chatbot_messages=all_chatbot_messages, chatbot_participation=chatbot_participation))
+            break
+        except KeyboardInterrupt:
             user_input = input("At MAIN:\n- If you want to stop the program, press Ctrl+C again.\n- If you want to continue, press Enter.\n- If you want to intervene with additional instructions, press 'i'.")
+            human_intervention = True
+            if messages:
+                if messages[-1]["role"] == "assistant" and messages[-1]["content"][-1].type == "tool_use":
+                    print("popping last message since tool command not processed")
+                    messages.pop()
             if user_input == "i":
                 instruction = input("Please provide the additional instructions:")
-                # if juji_design:
-                #     to_update_chatbot = input("Do you want to update the chatbot with your instructions? (y/n)")
-                #     if to_update_chatbot == "y":
-                #         _update_chatbot_with_new_faq(computer_use_client, tool_collection, juji_design, juji_chatbot_engagement_id, [], f"The user intervened the agent with the following instructions: {instruction}.")
-                # messages.append({"content": f"The human user intervened the agent with the following additional instructions: {instruction}\n\nplease adjust the plan for the agent to continue completing the task. Please do not use any tools.", "role": "user"})
-                human_intervened_with_additional_instructions = True
-    except Exception as e:
-        print(f"Encountered Error:\n{e}")
+                messages.append({"content": f"The human user intervened the agent with the following additional instructions: {instruction}\n\nplease adjust the plan for the agent to continue completing the task. Please do not use any tools.", "role": "user"})
+            else:
+                messages.append({"content": f"The human user intervened.\n\nplease adjust the plan for the agent to continue completing the task. Please do not use any tools.", "role": "user"})
+
+    # except Exception as e:
+    #     print(f"Encountered Error:\n{e}")
 
     # if USE_AGENTOPS:    
     #     agentops.end_session('Success')

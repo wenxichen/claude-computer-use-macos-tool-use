@@ -34,3 +34,4 @@ agentops.log
 checkpoints/
 
 .env
+chatbots/
