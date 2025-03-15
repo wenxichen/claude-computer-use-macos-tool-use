@@ -2,6 +2,8 @@
 
 This is a proof of concept for using AI agent as an evolving knowledge base for other AI agents.
 
+<img src="Computer_Use_with_knowledge_base_diagram.jpg" alt="Computer Use with knowledge base diagram" height="400">
+
 This uses Anthropic's Computer Use model to perform tasks on MacOS while it interacts with a Juji AI agent which acts as an external knowledge bases. The default model in use is Claude 3.5 Sonnet to perform tasks on your Mac by simulating mouse and keyboard actions. Please use this with caution.
 
 > [!CAUTION]
@@ -123,6 +125,10 @@ JUJI_API_KEY and JUJI_CHATBOT_ENGAGEMENT_ID will be used to update/evolve the Ju
 ### Human Intervention
 
 You can trigger human intervention at any time by pressing `Ctrl+C` in the terminal. The Computer Use model will stop and wait for further instructions.
+
+### Demo Video
+
+A demo video is available [here](https://vimeo.com/1066045673/eb2bf76896).
 
 ## References
 
