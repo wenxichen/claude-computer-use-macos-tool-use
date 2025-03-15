@@ -2,7 +2,7 @@
 
 This is a proof of concept for using AI agent as an evolving knowledge base for other AI agents.
 
-This uses Anthropic's Computer Use model to perform tasks on MacOS with multiple agents working together. Juji's AI agents are used as the knowledge base. The program runs the native MacOS. It uses Claude 3.5 Sonnet to perform tasks on your Mac by simulating mouse and keyboard actions. Please use this with caution.
+This uses Anthropic's Computer Use model to perform tasks on MacOS while it interacts with a Juji AI agent which acts as an external knowledge bases. The default model in use is Claude 3.5 Sonnet to perform tasks on your Mac by simulating mouse and keyboard actions. Please use this with caution.
 
 > [!CAUTION]
 > - **Security Risks:** This script allows claude to control your computer's mouse and keyboard and run bash commands. Use it at your own risk.
@@ -60,22 +60,35 @@ You can use Juji Chatbot to provide context to the Computer Use model. You can d
 
    Replace `CLAUDE_API_KEY` with your actual Anthropic API key. You find yours [here](https://console.anthropic.com/settings/keys).
 
-4. **[Optional] Set your AgentOps API key as an environment variable:**
+<!-- 4. **[Optional] Set your AgentOps API key as an environment variable:**
    
    DISABLED FOR NOW DUE TO MAKE KeyboardInterrupt WORK.
    ```bash
    export AGENTOPS_API_KEY="AGENTOPS_API_KEY"
    ```
 
-   Replace `AGENTOPS_API_KEY` with your actual AgentOps API key. You find yours [here](https://app.agentops.ai/settings/projects).
+   Replace `AGENTOPS_API_KEY` with your actual AgentOps API key. You find yours [here](https://app.agentops.ai/settings/projects). -->
 
-5. **[Optional] Set your Chatbot link as an environment variable:**
+4. **[Optional] Set your Chatbot link as an environment variable:**
 
    ```bash
    export CHATBOT_LINK="CHATBOT_LINK"
    ```
 
-   Replace `CHATBOT_LINK` with your actual Chatbot link. You find yours [here](https://app.juji.ai/chatbots).
+   Replace `CHATBOT_LINK` with your actual [Chatbot web deployment link](https://juji.io/docs/juji-studio/release/#generate-url). 
+   
+   This is used to query relevant information from the Juji AI agent to help the Computer Use model perform the task.
+
+5. **[Optional] Set your Juji API key and chatbot engagement ID as environment variables:**
+
+   ```bash
+   export JUJI_API_KEY="JUJI_API_KEY"
+   export JUJI_CHATBOT_ENGAGEMENT_ID="JUJI_CHATBOT_ENGAGEMENT_ID"
+   ```
+
+   Replace `JUJI_API_KEY` with your actual Juji API key. You find yours [here](https://juji.io/docs/api/#api-key-authentication). Replace `JUJI_CHATBOT_ENGAGEMENT_ID` with your actual Juji chatbot engagement ID. The chatbot engagement ID is the UUID at the end of the URL of your chatbot web deployment.
+
+   This is used to update/evolve the Juji AI agent's knowledge base based on the interactions with the Computer Use model and human intervention. So the Juji AI agent can accumulate knowledge from the Computer Use model's actions and improve the computer use operation over time.
 
 6. **Grant Accessibility Permissions:**
 
@@ -89,6 +102,8 @@ You can use Juji Chatbot to provide context to the Computer Use model. You can d
 
 You can run the script by passing the instruction directly via the command line or by editing the `main.py` file.
 
+### Basic Usage
+
 **Example using command line instruction:**
 
 ```bash
@@ -97,9 +112,17 @@ python main.py 'Open Safari and look up Anthropic'
 
 Replace `'Open Safari and look up Anthropic'` with your desired instruction.
 
-## Exiting the Script
+### Usage with Chatbot
 
-You can quit the script at any time by pressing `Ctrl+C` in the terminal.
+Make sure you have set the `CHATBOT_LINK`, `JUJI_API_KEY` and `JUJI_CHATBOT_ENGAGEMENT_ID` environment variables. See the section 4 and 5 in the [Installation and Setup](#installation-and-setup) section for more details. 
+
+CHATBOT_LINK will be used to query relevant information from the Juji AI agent to help the Computer Use model perform the task. 
+
+JUJI_API_KEY and JUJI_CHATBOT_ENGAGEMENT_ID will be used to update/evolve the Juji AI agent's knowledge base based on the interactions with the Computer Use model and human intervention.
+
+### Human Intervention
+
+You can trigger human intervention at any time by pressing `Ctrl+C` in the terminal. The Computer Use model will stop and wait for further instructions.
 
 ## References
 
