@@ -6,6 +6,9 @@ This is a proof of concept for using AI agent as an evolving knowledge base for 
 
 This uses Anthropic's Computer Use model to perform tasks on MacOS while it interacts with a Juji AI agent which acts as an external knowledge bases. The default model in use is Claude 3.5 Sonnet to perform tasks on your Mac by simulating mouse and keyboard actions. Please use this with caution.
 
+[Blog Post](https://wenxichen.substack.com/p/enhancing-computer-use-with-an-evolving)
+
+
 > [!CAUTION]
 > - **Security Risks:** This script allows claude to control your computer's mouse and keyboard and run bash commands. Use it at your own risk.
 > - **Responsibility:** By running this script, you assume all responsibility and liability for any results.
